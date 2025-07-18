@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: gmo-bot
+    env: python
+    plan: free
+    buildCommand: ""
+    startCommand: "python webhook_bot.py"
+    envVars:
+      - key: API_KEY
+        value: EGxl+85mHoo208TUiZRVSoFWlhodhCxM
+      - key: API_SECRET
+        value: Dy4KpK8pzdVtLpfBCh6vS1QwNx1F6npZPeufkqiYMF02i5SBVae9hE2LHWKFaWZT
