@@ -7,6 +7,10 @@ import json
 
 app = Flask(__name__)
 
+@app.route("/", methods=["GET"])
+def index():
+    return "✅ GMO BOT is running!"
+
 API_KEY = "EGxl+85mHoo208TUiZRVSoFWlhodhCxM"
 API_SECRET = "Dy4KpK8pzdVtLpfBCh6vS1QwNx1F6npZPeufkqiYMF02i5SBVae9hE2LHWKFaWZT"
 
@@ -54,6 +58,10 @@ def webhook():
     else:
         return jsonify({"status": "ignored"}), 200
 
+import os
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=80)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+
 
