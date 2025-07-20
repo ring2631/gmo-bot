@@ -7,6 +7,7 @@ import os
 import time
 import logging
 from dotenv import load_dotenv
+from datetime import datetime
 
 # 初期化
 app = Flask(__name__)
@@ -55,9 +56,10 @@ def get_margin_balance():
         logger.info(f"[get_margin_balance] Response: {data}")
         return float(data["data"]["availableMargin"])
 
-# ---- ボラティリティ計算 ----
+# ---- ボラティリティ計算（date付きでリクエスト）----
 def get_volatility():
-    url = f"{BASE_URL}/public/v1/klines?symbol={SYMBOL}&interval=1H&limit=24"
+    today = datetime.now().strftime("%Y%m%d")  # 例: 20250720
+    url = f"{BASE_URL}/public/v1/klines?symbol={SYMBOL}&interval=1H&limit=24&date={today}"
     try:
         with urllib.request.urlopen(url) as response:
             raw = response.read()
@@ -81,7 +83,7 @@ def send_order(side):
     position_value = order_margin * LEVERAGE
     size = round(position_value / price, 6)
 
-    trail_width = max(volatility * 1.5, 1500)
+    trail_width = max(volatility * 1.5, 1500)  # ← ボラ倍率は 1.5倍 に戻してる
     stop_loss = round(price * 0.975, 0)
 
     body = {
@@ -95,7 +97,7 @@ def send_order(side):
     }
     path = "/private/v1/order"
     body_json = json.dumps(body).encode("utf-8")
-    headers = make_headers("POST", path, body.decode("utf-8") if isinstance(body, bytes) else json.dumps(body))
+    headers = make_headers("POST", path, json.dumps(body))
 
     req = urllib.request.Request(BASE_URL + path, data=body_json, headers=headers, method="POST")
     try:
