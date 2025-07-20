@@ -1,7 +1,6 @@
 services:
   - type: web
-    name: gmo-bot
+    name: autotrade-bot
     env: python
-    buildCommand: ""
-    startCommand: python webhook_bot.py
-    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
