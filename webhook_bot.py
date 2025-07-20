@@ -8,11 +8,15 @@ import hashlib
 import json
 import logging
 
+# Flask アプリ設定
 app = Flask(__name__)
 load_dotenv()
 
-logging.basicConfig(level=logging.DEBUG)
+# ログ設定
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("webhook_bot")
 
+# 環境変数から API キー取得
 API_KEY = os.environ.get('GMO_API_KEY')
 API_SECRET = os.environ.get('GMO_API_SECRET')
 BASE_URL = 'https://api.coin.z.com'
@@ -21,11 +25,7 @@ LEVERAGE = 2
 MARGIN_JPY = 30000  # 証拠金
 
 def log(msg):
-    app.logger.info(msg)
-
-@app.route('/')
-def index():
-    return 'Webhook Bot is running.'
+    logger.info(msg)
 
 def make_headers(method, path, body=""):
     timestamp = str(int(time.time() * 1000))
@@ -44,12 +44,13 @@ def get_btc_price():
     res = requests.get(url)
     json_data = res.json()
     log(f"[get_btc_price] Response: {json_data}")
-    if 'data' not in json_data or not isinstance(json_data['data'], list) or len(json_data['data']) == 0:
+    if 'data' not in json_data or not isinstance(json_data['data'], list):
         raise ValueError(f"Invalid 'data' field: {json_data}")
     return float(json_data['data'][0]['last'])
 
 def get_volatility():
-    path = '/public/v1/klines?symbol=BTC_JPY&interval=1min&limit=100'
+    today = time.strftime("%Y-%m-%d")  # dateパラメータを追加
+    path = f"/public/v1/klines?symbol=BTC_JPY&interval=1min&date={today}&limit=100"
     url = BASE_URL + path
     res = requests.get(url)
     json_data = res.json()
@@ -69,6 +70,7 @@ def send_order(side):
 
     position_value = MARGIN_JPY * 0.35 * LEVERAGE
     size = round(position_value / price, 6)
+
     trail_width = max(volatility * 1.5, 1500)
     stop_loss_price = round(price * 0.975, 0)
 
@@ -93,14 +95,18 @@ def send_order(side):
         log(f"[send_order] Response status: {res.status_code}, body: {res.text}")
         return res.json()
     except Exception as e:
-        log(f"[send_order] Exception during request: {e}")
+        log(f"[send_order] Error: {e}")
         return {"status": "error", "message": str(e)}
+
+@app.route('/')
+def index():
+    return 'Bot is running.'
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
-        data = request.get_data(as_text=True)
-        log(f"[webhook] Raw data: {data!r}")
+        data = request.get_data(as_text=True).strip()
+        log(f"[webhook] Raw data: '{data}'")
         if 'BUY' in data:
             log("[webhook] Detected BUY signal")
             return jsonify(send_order("BUY"))
@@ -108,11 +114,12 @@ def webhook():
             log("[webhook] Detected SELL signal")
             return jsonify(send_order("SELL"))
         else:
-            log("[webhook] Invalid or missing signal")
+            log("[webhook] Invalid signal received")
             return jsonify({'status': 'ignored'}), 400
     except Exception as e:
-        log(f"[webhook] Exception: {e}")
+        log(f"[webhook] Error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
+
