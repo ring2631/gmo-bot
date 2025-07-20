@@ -23,6 +23,7 @@ BASE_URL = 'https://api.coin.z.com'
 SYMBOL = 'BTC_JPY'
 LEVERAGE = 2
 
+# ---- APIヘッダー作成 ----
 def make_headers(method, path, body=""):
     timestamp = str(int(time.time() * 1000))
     message = timestamp + method + path + body
@@ -34,6 +35,7 @@ def make_headers(method, path, body=""):
         "Content-Type": "application/json"
     }
 
+# ---- 現在価格取得 ----
 def get_btc_price():
     url = f"{BASE_URL}/public/v1/ticker?symbol={SYMBOL}"
     res = requests.get(url)
@@ -41,6 +43,7 @@ def get_btc_price():
     logger.info(f"[get_btc_price] Response: {data}")
     return float(data["data"][0]["last"])
 
+# ---- 証拠金情報取得 ----
 def get_margin_balance():
     path = "/private/v1/account/margin"
     headers = make_headers("GET", path)
@@ -49,12 +52,13 @@ def get_margin_balance():
     logger.info(f"[get_margin_balance] Response: {data}")
     return float(data["data"]["availableMargin"])
 
+# ---- ボラティリティ計算 ----
 def get_volatility():
     url = f"{BASE_URL}/public/v1/klines"
     params = {
         "symbol": SYMBOL,
-        "interval": "1hour",
-        "limit": 24
+        "interval": "1H",  # 公式仕様通り
+        "limit": 24        # 直近24本
     }
     try:
         res = requests.get(url, params=params)
@@ -68,17 +72,19 @@ def get_volatility():
         logger.error(f"[get_volatility] Error: {e}")
         raise
 
+# ---- 注文送信 ----
 def send_order(side):
     price = get_btc_price()
     volatility = get_volatility()
     margin = get_margin_balance()
 
-    order_margin = margin * 0.35  # 35% を使用
+    order_margin = margin * 0.35  # 証拠金の35%
     position_value = order_margin * LEVERAGE
-    size = round(position_value / price, 6)
+    size = round(position_value / price, 6)  # 取引数量
 
+    # トレイリング幅（最低1500円）
     trail_width = max(volatility * 1.5, 1500)
-    stop_loss = round(price * 0.975, 0)
+    stop_loss = round(price * 0.975, 0)  # 損切ライン（仮）
 
     body = {
         "symbol": SYMBOL,
@@ -101,6 +107,7 @@ def send_order(side):
         logger.error(f"[send_order] Error: {e}")
         return {"status": "error", "message": str(e)}
 
+# ---- Flaskルート ----
 @app.route('/', methods=['GET'])
 def index():
     return "Webhook Bot is running"
@@ -125,4 +132,5 @@ def webhook():
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000)
+
 
