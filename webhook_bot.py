@@ -55,9 +55,9 @@ def get_margin_balance():
         logger.info(f"[get_margin_balance] Response: {data}")
         return float(data["data"]["availableMargin"])
 
-# ---- ボラティリティ計算（dateは使わない！）----
+# ---- ボラティリティ計算（5分足×288本）----
 def get_volatility():
-    url = f"{BASE_URL}/public/v1/klines?symbol={SYMBOL}&interval=1H&limit=24"
+    url = f"{BASE_URL}/public/v1/klines?symbol={SYMBOL}&interval=5m&limit=288"
     try:
         with urllib.request.urlopen(url) as response:
             raw = response.read()
@@ -81,7 +81,7 @@ def send_order(side):
     position_value = order_margin * LEVERAGE
     size = round(position_value / price, 6)
 
-    trail_width = max(volatility * 1.5, 1500)  # ボラ倍率1.5倍
+    trail_width = max(volatility * 1.5, 1500)
     stop_loss = round(price * 0.975, 0)
 
     body = {
