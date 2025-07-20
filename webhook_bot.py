@@ -32,7 +32,7 @@ def get_volatility():
     params = {
         "symbol": SYMBOL,
         "interval": "1H",
-        "limit": 24  # 過去24時間分
+        "limit": 24
     }
     response = requests.get(url, params=params)
     data = response.json()
@@ -53,7 +53,17 @@ def get_margin():
                 return float(asset["available"])
     return None
 
-def send_order(price, size):
+def calculate_trailing_stop_width(volatility_data):
+    try:
+        prices = [float(candle["high"]) - float(candle["low"]) for candle in volatility_data["data"]]
+        average_range = sum(prices) / len(prices)
+        trail_percent = min(max(average_range / float(volatility_data["data"][-1]["close"]), 0.002), 0.01)
+        return round(trail_percent, 4)
+    except Exception as e:
+        logger.error("[calculate_trailing_stop_width] Error: %s", e)
+        return 0.005
+
+def send_order(price, size, trail_width):
     url = f"{BASE_URL}/private/v1/order"
     headers = {
         "API-KEY": API_KEY,
@@ -62,9 +72,9 @@ def send_order(price, size):
     payload = {
         "symbol": SYMBOL,
         "side": "BUY",
-        "executionType": "MARKET",
+        "executionType": "TRAIL",
         "size": str(size),
-        "price": str(price),
+        "trailWidth": str(round(price * trail_width, 0)),
         "leverageLevel": LEVERAGE
     }
     response = requests.post(url, headers=headers, json=payload)
@@ -103,8 +113,9 @@ def webhook():
 
         amount_to_use = margin * 0.35
         size = round((amount_to_use * LEVERAGE) / last_price, 4)
+        trail_width = calculate_trailing_stop_width(volatility_data)
 
-        result = send_order(last_price, size)
+        result = send_order(last_price, size, trail_width)
         return jsonify(result)
 
     return jsonify({"status": "ignored"}), 200
