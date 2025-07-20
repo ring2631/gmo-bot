@@ -54,14 +54,11 @@ def get_margin_balance():
 
 # ---- ボラティリティ計算 ----
 def get_volatility():
-    url = f"{BASE_URL}/public/v1/klines"
-    params = {
-        "symbol": SYMBOL,
-        "interval": "1H",  # 公式仕様通り
-        "limit": 24        # 直近24本
-    }
+    # クエリパラメータを明示的にクリーンに記述（date混入防止）
+    query = f"?symbol={SYMBOL}&interval=1H&limit=24"
+    url = f"{BASE_URL}/public/v1/klines{query}"
     try:
-        res = requests.get(url, params=params)
+        res = requests.get(url)
         data = res.json()
         logger.info(f"[get_volatility] Response: {data}")
         if data["status"] != 0 or "data" not in data:
@@ -80,11 +77,10 @@ def send_order(side):
 
     order_margin = margin * 0.35  # 証拠金の35%
     position_value = order_margin * LEVERAGE
-    size = round(position_value / price, 6)  # 取引数量
+    size = round(position_value / price, 6)
 
-    # トレイリング幅（最低1500円）
     trail_width = max(volatility * 1.5, 1500)
-    stop_loss = round(price * 0.975, 0)  # 損切ライン（仮）
+    stop_loss = round(price * 0.975, 0)
 
     body = {
         "symbol": SYMBOL,
@@ -107,7 +103,7 @@ def send_order(side):
         logger.error(f"[send_order] Error: {e}")
         return {"status": "error", "message": str(e)}
 
-# ---- Flaskルート ----
+# ---- Flaskルーティング ----
 @app.route('/', methods=['GET'])
 def index():
     return "Webhook Bot is running"
@@ -132,5 +128,4 @@ def webhook():
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000)
-
 
