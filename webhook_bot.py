@@ -8,14 +8,11 @@ import hashlib
 import json
 import logging
 
-# ログ設定
-logging.basicConfig(level=logging.INFO)
-
-def log(msg):
-    logging.info(msg)
-
 app = Flask(__name__)
 load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger()
 
 API_KEY = os.environ.get('GMO_API_KEY')
 API_SECRET = os.environ.get('GMO_API_SECRET')
@@ -41,12 +38,12 @@ def get_btc_price():
     res = requests.get(url)
     try:
         json_data = res.json()
-        log(f"[get_btc_price] Response: {json_data}")
-        if 'data' not in json_data or not isinstance(json_data['data'], dict):
+        log.info(f"[get_btc_price] Response: {json_data}")
+        if 'data' not in json_data or not isinstance(json_data['data'], list) or len(json_data['data']) == 0:
             raise ValueError(f"Invalid 'data' field: {json_data}")
-        return float(json_data['data']['last'])
+        return float(json_data['data'][0]['last'])
     except Exception as e:
-        log(f"[get_btc_price] Error: {e}")
+        log.error(f"[get_btc_price] Error: {e}")
         raise
 
 def get_volatility():
@@ -55,13 +52,13 @@ def get_volatility():
     res = requests.get(url)
     try:
         json_data = res.json()
-        log(f"[get_volatility] Response: {json_data}")
+        log.info(f"[get_volatility] Response: {json_data}")
         if 'data' not in json_data or not isinstance(json_data['data'], list):
             raise ValueError(f"Invalid 'data' field: {json_data}")
         vol_list = [float(c['high']) - float(c['low']) for c in json_data['data']]
         return sum(vol_list) / len(vol_list)
     except Exception as e:
-        log(f"[get_volatility] Error: {e}")
+        log.error(f"[get_volatility] Error: {e}")
         raise
 
 def send_order(side):
@@ -74,7 +71,7 @@ def send_order(side):
     trail_width = max(volatility * 1.5, 1500)
     stop_loss_price = round(price * 0.975, 0)
 
-    log(f"[send_order] {side} order: size={size}, price={price}, trail={trail_width}, SL={stop_loss_price}")
+    log.info(f"[send_order] {side} order: size={size}, price={price}, trail={trail_width}, SL={stop_loss_price}")
 
     path = '/private/v1/order'
     body = {
@@ -92,35 +89,28 @@ def send_order(side):
 
     try:
         res = requests.post(BASE_URL + path, headers=headers, data=body_json)
-        log(f"[send_order] Response status: {res.status_code}, body: {res.text}")
+        log.info(f"[send_order] Response status: {res.status_code}, body: {res.text}")
         return res.json()
     except Exception as e:
-        log(f"[send_order] Error: {e}")
+        log.error(f"[send_order] Error: {e}")
         return {"status": "error", "message": str(e)}
-
-@app.route('/', methods=['GET'])
-def index():
-    return 'Bot is running.'
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
         data = request.get_data(as_text=True)
-        log(f"[webhook] Incoming data: {data}")
+        log.info(f"[webhook] Incoming data: {data}")
         if 'BUY' in data:
             return jsonify(send_order("BUY"))
         elif 'SELL' in data:
             return jsonify(send_order("SELL"))
         else:
-            log("[webhook] Invalid signal received")
+            log.warning("[webhook] Invalid signal received")
             return jsonify({'status': 'ignored'}), 400
     except Exception as e:
-        log(f"[webhook] Error: {e}")
+        log.error(f"[webhook] Error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    log(f"Starting Flask app on port {port}")
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=5000)
 
