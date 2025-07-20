@@ -6,12 +6,10 @@ import time
 import hmac
 import hashlib
 import json
-import logging
+from datetime import datetime
 
 app = Flask(__name__)
 load_dotenv()
-
-logging.basicConfig(level=logging.INFO)
 
 API_KEY = os.environ.get('GMO_API_KEY')
 API_SECRET = os.environ.get('GMO_API_SECRET')
@@ -21,7 +19,7 @@ LEVERAGE = 2
 MARGIN_JPY = 30000  # 証拠金
 
 def log(msg):
-    logging.info(msg)
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}")
 
 def make_headers(method, path, body=""):
     timestamp = str(int(time.time() * 1000))
@@ -41,7 +39,7 @@ def get_btc_price():
     try:
         json_data = res.json()
         log(f"[get_btc_price] Response: {json_data}")
-        if 'data' not in json_data or not isinstance(json_data['data'], list) or not json_data['data']:
+        if 'data' not in json_data or not isinstance(json_data['data'], list):
             raise ValueError(f"Invalid 'data' field: {json_data}")
         return float(json_data['data'][0]['last'])
     except Exception as e:
@@ -49,7 +47,8 @@ def get_btc_price():
         raise
 
 def get_volatility():
-    path = '/public/v1/klines?symbol=BTC_JPY&interval=1&date=20250720'
+    date_str = datetime.now().strftime("%Y%m%d")
+    path = f'/public/v1/klines?symbol=BTC_JPY&interval=1&date={date_str}'
     url = BASE_URL + path
     res = requests.get(url)
     try:
@@ -101,6 +100,10 @@ def send_order(side):
         log(f"[send_order] Error: {e}")
         return {"status": "error", "message": str(e)}
 
+@app.route('/')
+def index():
+    return 'OK', 200
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
@@ -116,10 +119,6 @@ def webhook():
     except Exception as e:
         log(f"[webhook] Error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/', methods=['GET'])
-def home():
-    return 'GMO Bot Webhook is running.'
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
