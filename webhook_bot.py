@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-import requests
+import urllib.request
 import hmac
 import hashlib
 import json
@@ -38,8 +38,9 @@ def make_headers(method, path, body=""):
 # ---- 現在価格取得 ----
 def get_btc_price():
     url = f"{BASE_URL}/public/v1/ticker?symbol={SYMBOL}"
-    res = requests.get(url)
-    data = res.json()
+    res = urllib.request.urlopen(url)
+    raw = res.read()
+    data = json.loads(raw.decode())
     logger.info(f"[get_btc_price] Response: {data}")
     return float(data["data"][0]["last"])
 
@@ -47,24 +48,25 @@ def get_btc_price():
 def get_margin_balance():
     path = "/private/v1/account/margin"
     headers = make_headers("GET", path)
-    res = requests.get(BASE_URL + path, headers=headers)
-    data = res.json()
-    logger.info(f"[get_margin_balance] Response: {data}")
-    return float(data["data"]["availableMargin"])
+    req = urllib.request.Request(BASE_URL + path, headers=headers, method='GET')
+    with urllib.request.urlopen(req) as res:
+        raw = res.read()
+        data = json.loads(raw.decode())
+        logger.info(f"[get_margin_balance] Response: {data}")
+        return float(data["data"]["availableMargin"])
 
 # ---- ボラティリティ計算 ----
 def get_volatility():
-    # クエリパラメータを明示的にクリーンに記述（date混入防止）
-    query = f"?symbol={SYMBOL}&interval=1H&limit=24"
-    url = f"{BASE_URL}/public/v1/klines{query}"
+    url = f"{BASE_URL}/public/v1/klines?symbol={SYMBOL}&interval=1H&limit=24"
     try:
-        res = requests.get(url)
-        data = res.json()
-        logger.info(f"[get_volatility] Response: {data}")
-        if data["status"] != 0 or "data" not in data:
-            raise ValueError(f"Invalid 'data' field: {data}")
-        prices = [float(d["high"]) - float(d["low"]) for d in data["data"]]
-        return sum(prices) / len(prices)
+        with urllib.request.urlopen(url) as response:
+            raw = response.read()
+            data = json.loads(raw.decode())
+            logger.info(f"[get_volatility] Response: {data}")
+            if data["status"] != 0 or "data" not in data:
+                raise ValueError(f"Invalid 'data' field: {data}")
+            prices = [float(d["high"]) - float(d["low"]) for d in data["data"]]
+            return sum(prices) / len(prices)
     except Exception as e:
         logger.error(f"[get_volatility] Error: {e}")
         raise
@@ -75,7 +77,7 @@ def send_order(side):
     volatility = get_volatility()
     margin = get_margin_balance()
 
-    order_margin = margin * 0.35  # 証拠金の35%
+    order_margin = margin * 0.35
     position_value = order_margin * LEVERAGE
     size = round(position_value / price, 6)
 
@@ -92,13 +94,16 @@ def send_order(side):
         "trailWidth": round(trail_width)
     }
     path = "/private/v1/order"
-    body_json = json.dumps(body)
-    headers = make_headers("POST", path, body_json)
+    body_json = json.dumps(body).encode("utf-8")
+    headers = make_headers("POST", path, body.decode("utf-8") if isinstance(body, bytes) else json.dumps(body))
 
+    req = urllib.request.Request(BASE_URL + path, data=body_json, headers=headers, method="POST")
     try:
-        res = requests.post(BASE_URL + path, headers=headers, data=body_json)
-        logger.info(f"[send_order] Response: {res.status_code} {res.text}")
-        return res.json()
+        with urllib.request.urlopen(req) as res:
+            raw = res.read()
+            data = json.loads(raw.decode())
+            logger.info(f"[send_order] Response: {data}")
+            return data
     except Exception as e:
         logger.error(f"[send_order] Error: {e}")
         return {"status": "error", "message": str(e)}
