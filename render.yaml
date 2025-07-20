@@ -1,6 +1,13 @@
 services:
   - type: web
-    name: autotrade-bot
+    name: gmo-bot
     env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python app.py
+    plan: starter  # ← ここを starter に！
+    buildCommand: ""
+    startCommand: python webhook_bot.py
+    envVars:
+      - key: GMO_API_KEY
+        sync: false
+      - key: GMO_API_SECRET
+        sync: false
+    autoDeploy: true
