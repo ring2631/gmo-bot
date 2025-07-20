@@ -1,125 +1,120 @@
-import os
-import requests
-import logging
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
+import os
+import requests
+import time
+import hmac
+import hashlib
+import json
+import logging
 
-# .env 読み込み
+app = Flask(__name__)
 load_dotenv()
-
-API_KEY = os.getenv("API_KEY")
-API_SECRET = os.getenv("API_SECRET")
-BASE_URL = "https://api.coin.z.com"
-SYMBOL = "BTC_JPY"
-LEVERAGE = 2
 
 # ログ設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
-app = Flask(__name__)
+API_KEY = os.environ.get('GMO_API_KEY')
+API_SECRET = os.environ.get('GMO_API_SECRET')
+BASE_URL = 'https://api.coin.z.com'
+PRODUCT_CODE = 'BTC_JPY'
+LEVERAGE = 2
+
+def make_headers(method, path, body=""):
+    timestamp = str(int(time.time() * 1000))
+    text = timestamp + method + path + body
+    sign = hmac.new(API_SECRET.encode(), text.encode(), hashlib.sha256).hexdigest()
+    return {
+        'API-KEY': API_KEY,
+        'API-TIMESTAMP': timestamp,
+        'API-SIGN': sign,
+        'Content-Type': 'application/json'
+    }
 
 def get_btc_price():
-    url = f"{BASE_URL}/public/v1/ticker"
-    params = {"symbol": SYMBOL}
-    response = requests.get(url, params=params)
-    data = response.json()
-    logger.info("[get_btc_price] Response: %s", data)
-    return data
+    path = '/public/v1/ticker?symbol=BTC_JPY'
+    url = BASE_URL + path
+    res = requests.get(url)
+    json_data = res.json()
+    logger.info(f"[get_btc_price] Response: {json_data}")
+    return float(json_data['data'][0]['last'])
+
+def get_margin_balance():
+    path = '/private/v1/account/margin'
+    headers = make_headers('GET', path)
+    res = requests.get(BASE_URL + path, headers=headers)
+    json_data = res.json()
+    logger.info(f"[get_margin_balance] Response: {json_data}")
+    return float(json_data['data']['availableAmount'])
 
 def get_volatility():
-    url = f"{BASE_URL}/public/v1/klines"
-    params = {
-        "symbol": SYMBOL,
-        "interval": "1H",
-        "limit": 24
-    }
-    response = requests.get(url, params=params)
-    data = response.json()
-    logger.info("[get_volatility] Response: %s", data)
-    return data
+    path = '/public/v1/klines?symbol=BTC_JPY&interval=1H&limit=24'
+    url = BASE_URL + path
+    res = requests.get(url)
+    json_data = res.json()
+    logger.info(f"[get_volatility] Response: {json_data}")
+    if 'data' not in json_data or not isinstance(json_data['data'], list):
+        raise ValueError(f"Invalid 'data' field: {json_data}")
+    vol_list = [float(candle['high']) - float(candle['low']) for candle in json_data['data']]
+    return sum(vol_list) / len(vol_list)
 
-def get_margin():
-    url = f"{BASE_URL}/private/v1/account/assets"
-    headers = {
-        "API-KEY": API_KEY,
-    }
-    response = requests.get(url, headers=headers)
-    data = response.json()
-    logger.info("[get_margin] Response: %s", data)
-    if data.get("status") == 0 and "data" in data:
-        for asset in data["data"]:
-            if asset["symbol"] == SYMBOL:
-                return float(asset["available"])
-    return None
-
-def calculate_trailing_stop_width(volatility_data):
+def send_order(side):
     try:
-        prices = [float(candle["high"]) - float(candle["low"]) for candle in volatility_data["data"]]
-        average_range = sum(prices) / len(prices)
-        trail_percent = min(max(average_range / float(volatility_data["data"][-1]["close"]), 0.002), 0.01)
-        return round(trail_percent, 4)
+        price = get_btc_price()
+        volatility = get_volatility()
+        margin = get_margin_balance()
+
+        position_value = margin * 0.35 * LEVERAGE
+        size = round(position_value / price, 6)
+        trail_width = max(volatility * 1.5, 1500)
+        stop_loss_price = round(price * 0.975, 0)
+
+        logger.info(f"[send_order] {side} order: size={size}, price={price}, trail={trail_width}, SL={stop_loss_price}")
+
+        path = '/private/v1/order'
+        body = {
+            "symbol": PRODUCT_CODE,
+            "side": side,
+            "executionType": "MARKET",
+            "size": size,
+            "leverageLevel": LEVERAGE,
+            "lossCutPrice": stop_loss_price,
+            "trailWidth": round(trail_width, 0)
+        }
+
+        body_json = json.dumps(body)
+        headers = make_headers("POST", path, body_json)
+        res = requests.post(BASE_URL + path, headers=headers, data=body_json)
+        logger.info(f"[send_order] Response status: {res.status_code}, body: {res.text}")
+        return res.json()
     except Exception as e:
-        logger.error("[calculate_trailing_stop_width] Error: %s", e)
-        return 0.005
+        logger.error(f"[send_order] Error: {e}")
+        return {"status": "error", "message": str(e)}
 
-def send_order(price, size, trail_width):
-    url = f"{BASE_URL}/private/v1/order"
-    headers = {
-        "API-KEY": API_KEY,
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "symbol": SYMBOL,
-        "side": "BUY",
-        "executionType": "TRAIL",
-        "size": str(size),
-        "trailWidth": str(round(price * trail_width, 0)),
-        "leverageLevel": LEVERAGE
-    }
-    response = requests.post(url, headers=headers, json=payload)
-    data = response.json()
-    logger.info("[send_order] Response: %s", data)
-    return data
-
-@app.route("/", methods=["GET"])
+@app.route('/')
 def index():
-    return "GMO Webhook Bot is running."
+    return "Webhook Bot Running"
 
-@app.route("/webhook", methods=["POST"])
+@app.route('/webhook', methods=['POST'])
 def webhook():
-    raw_data = request.data.decode("utf-8")
-    logger.info("[webhook] Raw data: %r", raw_data)
+    try:
+        data = request.get_data(as_text=True)
+        logger.info(f"[webhook] Raw data: {repr(data)}")
+        if 'BUY' in data:
+            logger.info("[webhook] Detected BUY signal")
+            return jsonify(send_order("BUY"))
+        elif 'SELL' in data:
+            logger.info("[webhook] Detected SELL signal")
+            return jsonify(send_order("SELL"))
+        else:
+            logger.warning("[webhook] Invalid signal received")
+            return jsonify({'status': 'ignored'}), 400
+    except Exception as e:
+        logger.error(f"[webhook] Error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
-    if "BUY" in raw_data.upper():
-        logger.info("[webhook] Detected BUY signal")
-
-        price_data = get_btc_price()
-        volatility_data = get_volatility()
-
-        if price_data.get("status") != 0 or "data" not in price_data:
-            logger.error("[webhook] Error: Invalid price data: %s", price_data)
-            return jsonify({"error": "Invalid price data"}), 500
-
-        if volatility_data.get("status") != 0 or "data" not in volatility_data:
-            logger.error("[webhook] Error: Invalid volatility data: %s", volatility_data)
-            return jsonify({"error": "Invalid volatility data"}), 500
-
-        last_price = float(price_data["data"][0]["last"])
-        margin = get_margin()
-        if margin is None:
-            logger.error("[webhook] Error: Could not retrieve margin")
-            return jsonify({"error": "Could not retrieve margin"}), 500
-
-        amount_to_use = margin * 0.35
-        size = round((amount_to_use * LEVERAGE) / last_price, 4)
-        trail_width = calculate_trailing_stop_width(volatility_data)
-
-        result = send_order(last_price, size, trail_width)
-        return jsonify(result)
-
-    return jsonify({"status": "ignored"}), 200
-
-if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
 
