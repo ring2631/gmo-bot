@@ -7,6 +7,7 @@ import os
 import time
 import logging
 from dotenv import load_dotenv
+from datetime import datetime
 
 # 初期化
 app = Flask(__name__)
@@ -55,9 +56,10 @@ def get_margin_balance():
         logger.info(f"[get_margin_balance] Response: {data}")
         return float(data["data"]["availableMargin"])
 
-# ---- ボラティリティ計算（5分足×288本）----
+# ---- ボラティリティ取得（5m足＋date=今日）----
 def get_volatility():
-    url = f"{BASE_URL}/public/v1/klines?symbol={SYMBOL}&interval=5m&limit=288"
+    today = datetime.now().strftime("%Y%m%d")  # 例：20250720
+    url = f"{BASE_URL}/public/v1/klines?symbol={SYMBOL}&interval=5m&limit=288&date={today}"
     try:
         with urllib.request.urlopen(url) as response:
             raw = response.read()
@@ -133,3 +135,4 @@ def webhook():
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000)
+
