@@ -8,24 +8,19 @@ import hashlib
 import json
 import logging
 
-# Flask アプリ設定
-app = Flask(__name__)
-load_dotenv()
-
 # ログ設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
-# 環境変数から API キー取得
+app = Flask(__name__)
+load_dotenv()
+
 API_KEY = os.environ.get('GMO_API_KEY')
 API_SECRET = os.environ.get('GMO_API_SECRET')
 BASE_URL = 'https://api.coin.z.com'
 PRODUCT_CODE = 'BTC_JPY'
 LEVERAGE = 2
 MARGIN_JPY = 30000  # 証拠金
-
-def log(msg):
-    logger.info(msg)
 
 def make_headers(method, path, body=""):
     timestamp = str(int(time.time() * 1000))
@@ -43,18 +38,17 @@ def get_btc_price():
     url = BASE_URL + path
     res = requests.get(url)
     json_data = res.json()
-    log(f"[get_btc_price] Response: {json_data}")
+    logger.info(f"[get_btc_price] Response: {json_data}")
     if 'data' not in json_data or not isinstance(json_data['data'], list):
         raise ValueError(f"Invalid 'data' field: {json_data}")
     return float(json_data['data'][0]['last'])
 
 def get_volatility():
-    today = time.strftime("%Y-%m-%d")  # dateパラメータを追加
-    path = f"/public/v1/klines?symbol=BTC_JPY&interval=1min&date={today}&limit=100"
+    path = '/public/v1/klines?symbol=BTC_JPY&interval=1min&limit=100'
     url = BASE_URL + path
     res = requests.get(url)
     json_data = res.json()
-    log(f"[get_volatility] Response: {json_data}")
+    logger.info(f"[get_volatility] Response: {json_data}")
     if 'data' not in json_data or not isinstance(json_data['data'], list):
         raise ValueError(f"Invalid 'data' field: {json_data}")
     vol_list = [float(c['high']) - float(c['low']) for c in json_data['data']]
@@ -64,62 +58,59 @@ def send_order(side):
     try:
         price = get_btc_price()
         volatility = get_volatility()
-    except Exception as e:
-        log(f"[send_order] Error: {e}")
-        return {"status": "error", "message": str(e)}
 
-    position_value = MARGIN_JPY * 0.35 * LEVERAGE
-    size = round(position_value / price, 6)
+        position_value = MARGIN_JPY * 0.35 * LEVERAGE
+        size = round(position_value / price, 6)
 
-    trail_width = max(volatility * 1.5, 1500)
-    stop_loss_price = round(price * 0.975, 0)
+        trail_width = max(volatility * 1.5, 1500)
+        stop_loss_price = round(price * 0.975, 0)
 
-    log(f"[send_order] {side} order: size={size}, price={price}, trail={trail_width}, SL={stop_loss_price}")
+        logger.info(f"[send_order] {side} order: size={size}, price={price}, trail={trail_width}, SL={stop_loss_price}")
 
-    path = '/private/v1/order'
-    body = {
-        "symbol": PRODUCT_CODE,
-        "side": side,
-        "executionType": "MARKET",
-        "size": size,
-        "leverageLevel": LEVERAGE,
-        "lossCutPrice": stop_loss_price,
-        "trailWidth": round(trail_width, 0)
-    }
+        path = '/private/v1/order'
+        body = {
+            "symbol": PRODUCT_CODE,
+            "side": side,
+            "executionType": "MARKET",
+            "size": size,
+            "leverageLevel": LEVERAGE,
+            "lossCutPrice": stop_loss_price,
+            "trailWidth": round(trail_width, 0)
+        }
 
-    body_json = json.dumps(body)
-    headers = make_headers("POST", path, body_json)
-
-    try:
+        body_json = json.dumps(body)
+        headers = make_headers("POST", path, body_json)
         res = requests.post(BASE_URL + path, headers=headers, data=body_json)
-        log(f"[send_order] Response status: {res.status_code}, body: {res.text}")
+
+        logger.info(f"[send_order] Response status: {res.status_code}, body: {res.text}")
         return res.json()
     except Exception as e:
-        log(f"[send_order] Error: {e}")
+        logger.error(f"[send_order] Error: {e}")
         return {"status": "error", "message": str(e)}
 
 @app.route('/')
 def index():
-    return 'Bot is running.'
+    return "Webhook bot is running"
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
         data = request.get_data(as_text=True).strip()
-        log(f"[webhook] Raw data: '{data}'")
+        logger.info(f"[webhook] Raw data: '{data}'")
         if 'BUY' in data:
-            log("[webhook] Detected BUY signal")
+            logger.info("[webhook] Detected BUY signal")
             return jsonify(send_order("BUY"))
         elif 'SELL' in data:
-            log("[webhook] Detected SELL signal")
+            logger.info("[webhook] Detected SELL signal")
             return jsonify(send_order("SELL"))
         else:
-            log("[webhook] Invalid signal received")
+            logger.warning("[webhook] Invalid signal received")
             return jsonify({'status': 'ignored'}), 400
     except Exception as e:
-        log(f"[webhook] Error: {e}")
+        logger.error(f"[webhook] Error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
+
 
