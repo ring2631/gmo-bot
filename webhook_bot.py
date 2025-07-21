@@ -28,20 +28,14 @@ def make_headers(method, path, body=""):
     timestamp = str(int(time.time() * 1000))
     message = timestamp + method + path + body
     sign = hmac.new(API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
-    return {
-        "API-KEY": API_KEY,
-        "API-TIMESTAMP": timestamp,
-        "API-SIGN": sign,
-        "Content-Type": "application/json"
-    }
 
-    # デバッグ用出力（重要！）
-    print(f"[DEBUG] timestamp: {timestamp}")
-    print(f"[DEBUG] method: {method}")
-    print(f"[DEBUG] path: {path}")
-    print(f"[DEBUG] body: {body}")
-    print(f"[DEBUG] message for HMAC: {message}")
-    print(f"[DEBUG] signature: {sign}")
+    # デバッグ出力
+    print("DEBUG: timestamp =", timestamp)
+    print("DEBUG: method =", method)
+    print("DEBUG: path =", path)
+    print("DEBUG: body =", body)
+    print("DEBUG: message =", message)
+    print("DEBUG: sign =", sign)
 
     return {
         "API-KEY": API_KEY,
@@ -49,6 +43,7 @@ def make_headers(method, path, body=""):
         "API-SIGN": sign,
         "Content-Type": "application/json"
     }
+
 
 # 現在価格取得
 def get_btc_price():
