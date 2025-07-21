@@ -13,7 +13,8 @@ app = Flask(__name__)
 load_dotenv()
 
 # ログ設定
-logging.basicConfig(level=logging.INFO)
+import logging
+logging.basicConfig(level=logging.DEBUG)  # ← INFO → DEBUG に変更
 logger = logging.getLogger("webhook_bot")
 
 # 環境変数
@@ -29,13 +30,12 @@ def make_headers(method, path, body=""):
     message = timestamp + method + path + body
     sign = hmac.new(API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
 
-    # デバッグ出力
-    print("DEBUG: timestamp =", timestamp)
-    print("DEBUG: method =", method)
-    print("DEBUG: path =", path)
-    print("DEBUG: body =", body)
-    print("DEBUG: message =", message)
-    print("DEBUG: sign =", sign)
+    print(f"[DEBUG] timestamp: {timestamp}")
+    print(f"[DEBUG] method: {method}")
+    print(f"[DEBUG] path: {path}")
+    print(f"[DEBUG] body: '{body}'")  # ← '' で囲んで空文字が確認できる
+    print(f"[DEBUG] message: {message}")
+    print(f"[DEBUG] sign: {sign}")
 
     return {
         "API-KEY": API_KEY,
