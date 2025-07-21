@@ -6,8 +6,8 @@ import json
 import os
 import time
 import logging
+import re
 from dotenv import load_dotenv
-from datetime import datetime
 
 # 初期化
 app = Flask(__name__)
@@ -56,27 +56,9 @@ def get_margin_balance():
         logger.info(f"[get_margin_balance] Response: {data}")
         return float(data["data"]["availableMargin"])
 
-# ---- ボラティリティ取得（5m足＋date=今日）----
-def get_volatility():
-    today = datetime.now().strftime("%Y%m%d")  # 例：20250720
-    url = f"{BASE_URL}/public/v1/klines?symbol={SYMBOL}&interval=5m&limit=288&date={today}"
-    try:
-        with urllib.request.urlopen(url) as response:
-            raw = response.read()
-            data = json.loads(raw.decode())
-            logger.info(f"[get_volatility] Response: {data}")
-            if data["status"] != 0 or "data" not in data:
-                raise ValueError(f"Invalid 'data' field: {data}")
-            prices = [float(d["high"]) - float(d["low"]) for d in data["data"]]
-            return sum(prices) / len(prices)
-    except Exception as e:
-        logger.error(f"[get_volatility] Error: {e}")
-        raise
-
 # ---- 注文送信 ----
-def send_order(side):
+def send_order(side, volatility):
     price = get_btc_price()
-    volatility = get_volatility()
     margin = get_margin_balance()
 
     order_margin = margin * 0.35
@@ -110,22 +92,26 @@ def send_order(side):
         logger.error(f"[send_order] Error: {e}")
         return {"status": "error", "message": str(e)}
 
-# ---- Flaskルーティング ----
-@app.route('/', methods=['GET'])
-def index():
-    return "Webhook Bot is running"
-
+# ---- Webhook受信処理 ----
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
         raw_data = request.get_data(as_text=True)
         logger.info(f"[webhook] Raw data: '{raw_data}'")
+
+        # VOL=xxxx の抽出
+        match = re.search(r'VOL=(\d+\.?\d*)', raw_data)
+        if not match:
+            logger.warning("[webhook] VOL=xxxx not found in webhook")
+            return jsonify({"status": "error", "message": "Missing VOL=xxxx"}), 400
+        volatility = float(match.group(1))
+
         if 'BUY' in raw_data:
             logger.info("[webhook] Detected BUY signal")
-            return jsonify(send_order("BUY"))
+            return jsonify(send_order("BUY", volatility))
         elif 'SELL' in raw_data:
             logger.info("[webhook] Detected SELL signal")
-            return jsonify(send_order("SELL"))
+            return jsonify(send_order("SELL", volatility))
         else:
             logger.warning("[webhook] Invalid signal received")
             return jsonify({"status": "ignored"}), 400
@@ -133,6 +119,7 @@ def webhook():
         logger.error(f"[webhook] Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# ---- Flask起動 ----
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000)
 
