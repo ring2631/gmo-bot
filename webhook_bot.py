@@ -61,10 +61,9 @@ def get_margin_balance():
     headers = make_headers("GET", path)
     res = requests.get(BASE_URL + path, headers=headers)
     data = res.json()
-    logger.info(f"[get_margin_balance] Response: {data}")
-    if data["status"] != 0:
-        raise ValueError("Margin API failed")
+    print("[DEBUG] get_margin_balance response:", data)
     return float(data["data"]["availableMargin"])
+
 
 # 注文送信
 def send_order(side, volatility):
