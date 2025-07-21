@@ -30,10 +30,11 @@ def make_headers(method, path, body=""):
     message = timestamp + method + path + body
     sign = hmac.new(API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
 
+    # ← これらの print が今まだ見えてない！
     print(f"[DEBUG] timestamp: {timestamp}")
     print(f"[DEBUG] method: {method}")
     print(f"[DEBUG] path: {path}")
-    print(f"[DEBUG] body: '{body}'")  # ← '' で囲んで空文字が確認できる
+    print(f"[DEBUG] body: '{body}'")  # ''つけて空かどうか確認しやすく
     print(f"[DEBUG] message: {message}")
     print(f"[DEBUG] sign: {sign}")
 
@@ -43,6 +44,7 @@ def make_headers(method, path, body=""):
         "API-SIGN": sign,
         "Content-Type": "application/json"
     }
+
 
 
 # 現在価格取得
