@@ -8,98 +8,108 @@ import os
 import logging
 from dotenv import load_dotenv
 
-# 初期化
+# Flask setup
 app = Flask(__name__)
 load_dotenv()
 
-# ログ設定
+# Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
-# 環境変数
+# Constants from .env
 API_KEY = os.getenv("BITGET_API_KEY")
 API_SECRET = os.getenv("BITGET_API_SECRET")
 API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
-BASE_URL = "https://api.bitget.com"
-SYMBOL = os.getenv("SYMBOL", "BTCUSDT")
+SYMBOL = os.getenv("SYMBOL", "BTCUSDT_UMCBL")
 LEVERAGE = int(os.getenv("LEVERAGE", 2))
 MARGIN_RATIO = 0.35
-VOL_MULTIPLIER = 1.5
 
-# ヘッダー作成
-def make_headers(timestamp, method, request_path, body):
-    pre_hash = f"{timestamp}{method.upper()}{request_path}{body}"
-    sign = hmac.new(API_SECRET.encode(), pre_hash.encode(), hashlib.sha256).hexdigest()
+# Endpoint and headers
+BASE_URL = "https://api.bitget.com"
+
+# --- Signature Generation ---
+def generate_signature(timestamp, method, request_path, body_str):
+    message = f"{timestamp}{method}{request_path}{body_str}"
+    mac = hmac.new(API_SECRET.encode("utf-8"), message.encode("utf-8"), digestmod=hashlib.sha256)
+    return mac.hexdigest()
+
+# --- Headers ---
+def get_headers(method, path, body=""):
+    timestamp = str(int(time.time() * 1000))
+    signature = generate_signature(timestamp, method, path, body)
     return {
         "ACCESS-KEY": API_KEY,
-        "ACCESS-SIGN": sign,
+        "ACCESS-SIGN": signature,
         "ACCESS-TIMESTAMP": timestamp,
         "ACCESS-PASSPHRASE": API_PASSPHRASE,
         "Content-Type": "application/json"
     }
 
-# BTC価格取得
+# --- Get BTC Price ---
 def get_btc_price():
     url = f"{BASE_URL}/api/mix/v1/market/ticker?symbol={SYMBOL}&productType=umcbl"
     res = requests.get(url)
     data = res.json()
     logger.info(f"[get_btc_price] Response: {data}")
-    return float(data['data']['last'])
+    return float(data["data"]["last"])
 
-# 証拠金取得
-def get_balance():
-    timestamp = str(int(time.time() * 1000))
+# --- Get Account Balance ---
+def get_margin_balance():
     path = "/api/mix/v1/account/account"
-    url = BASE_URL + path + f"?symbol={SYMBOL}&marginCoin=USDT"
-    headers = make_headers(timestamp, "GET", path + f"?symbol={SYMBOL}&marginCoin=USDT", "")
-    res = requests.get(url, headers=headers)
+    query = f"?symbol={SYMBOL}"
+    headers = get_headers("GET", path + query)
+    res = requests.get(BASE_URL + path + query, headers=headers)
     data = res.json()
-    logger.info(f"[get_balance] Response: {data}")
-    return float(data['data']['available'])
+    logger.info(f"[get_margin_balance] Response: {data}")
+    return float(data["data"]["available"])
 
-# 注文送信（成行）
+# --- Place Order ---
 def send_order(side, volatility):
     price = get_btc_price()
-    margin = get_balance()
-    
+    margin = get_margin_balance()
+
     order_margin = margin * MARGIN_RATIO
     position_value = order_margin * LEVERAGE
-    size = round(position_value / price, 3)
+    size = round(position_value / price, 6)
 
-    trail_value = max(float(volatility) * VOL_MULTIPLIER, 15.0)
-    stop_loss = round(price * 0.975, 1)
+    trail_width = max(float(volatility) * 1.5, 15)
+    stop_loss = round(price * 0.975, 2)
 
-    timestamp = str(int(time.time() * 1000))
-    path = "/api/mix/v1/order/placeOrder"
+    path = "/api/mix/v1/order/placePlan"
     body = {
         "symbol": SYMBOL,
         "marginCoin": "USDT",
+        "size": str(size),
         "side": side.lower(),
         "orderType": "market",
-        "size": str(size),
-        "productType": "umcbl",
+        "triggerPrice": str(price),
+        "planType": "track_plan",
+        "triggerType": "market_price",
+        "executePrice": "",
         "presetStopLossPrice": str(stop_loss),
-        "timeInForceValue": "normal"
+        "triggerProfitPrice": "",
+        "rangeRate": str(trail_width / price)
     }
-    body_json = json.dumps(body)
-    headers = make_headers(timestamp, "POST", path, body_json)
-    res = requests.post(BASE_URL + path, headers=headers, data=body_json)
+
+    body_str = json.dumps(body)
+    headers = get_headers("POST", path, body_str)
+    res = requests.post(BASE_URL + path, headers=headers, data=body_str)
     logger.info(f"[send_order] Response: {res.status_code} {res.text}")
     return res.json()
 
-# VOL抽出
+# --- Extract volatility from webhook ---
 def extract_volatility(payload):
     try:
         for token in payload.split():
             if token.startswith("VOL="):
                 return float(token.replace("VOL=", ""))
-        raise ValueError("VOL not found")
+        raise ValueError("VOL=xxxx が見つかりません")
     except Exception as e:
         logger.error(f"[extract_volatility] Error: {e}")
         raise
 
-# Webhookエンドポイント
-@app.route("/webhook", methods=["POST"])
+# --- Webhook route ---
+@app.route('/webhook', methods=['POST'])
 def webhook():
     try:
         raw_data = request.get_data(as_text=True)
@@ -108,16 +118,23 @@ def webhook():
         if 'BUY' in raw_data:
             logger.info("[webhook] Detected BUY signal")
             vol = extract_volatility(raw_data)
-            return jsonify(send_order("buy", vol))
+            return jsonify(send_order("BUY", vol))
         elif 'SELL' in raw_data:
             logger.info("[webhook] Detected SELL signal")
             vol = extract_volatility(raw_data)
-            return jsonify(send_order("sell", vol))
+            return jsonify(send_order("SELL", vol))
         else:
+            logger.warning("[webhook] Invalid signal received")
             return jsonify({"status": "ignored"}), 400
     except Exception as e:
         logger.error(f"[webhook] Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# --- Index route ---
+@app.route('/')
+def index():
+    return "Bitget Webhook Bot is running"
+
+# --- Run ---
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000)
