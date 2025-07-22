@@ -2,14 +2,14 @@ from flask import Flask, request, jsonify
 import requests
 import hmac
 import hashlib
+import base64
 import json
 import os
 import time
 import logging
-import base64
 from dotenv import load_dotenv
 
-# 初期化
+# Flask初期化
 app = Flask(__name__)
 load_dotenv()
 
@@ -20,28 +20,12 @@ logger = logging.getLogger("webhook_bot")
 # 環境変数
 API_KEY = os.environ.get("BITGET_API_KEY")
 API_SECRET = os.environ.get("BITGET_API_SECRET")
-PASSPHRASE = os.environ.get("BITGET_API_PASSPHRASE")
+API_PASSPHRASE = os.environ.get("BITGET_API_PASSPHRASE")
 BASE_URL = "https://api.bitget.com"
 SYMBOL = "BTCUSDT_UMCBL"
 LEVERAGE = 2
 
-# ---- APIヘッダー作成 ----
-def make_headers(method, path, body=""):
-    timestamp = str(int(time.time() * 1000))
-    pre_hash = timestamp + method.upper() + path + body
-    sign = hmac.new(API_SECRET.encode(), pre_hash.encode(), hashlib.sha256).digest()
-    sign_b64 = base64.b64encode(sign).decode()
-
-    headers = {
-        "ACCESS-KEY": API_KEY,
-        "ACCESS-SIGN": sign_b64,
-        "ACCESS-TIMESTAMP": timestamp,
-        "ACCESS-PASSPHRASE": PASSPHRASE,
-        "Content-Type": "application/json"
-    }
-    return headers
-
-# ---- 現在価格取得 ----
+# ---- 価格取得 ----
 def get_btc_price():
     url = f"{BASE_URL}/api/mix/v1/market/ticker?symbol={SYMBOL}"
     res = requests.get(url)
@@ -51,17 +35,31 @@ def get_btc_price():
 
 # ---- 証拠金取得 ----
 def get_margin_balance():
-    path = "/api/mix/v1/account/account?symbol=BTCUSDT_UMCBL"
-    headers = make_headers("GET", path)
-    url = BASE_URL + path
+    timestamp = str(int(time.time() * 1000))
+    method = "GET"
+    path = "/api/mix/v1/account/account"
+    params = f"symbol={SYMBOL}"
+    url = f"{BASE_URL}{path}?{params}"
+
+    sign_str = f"{timestamp}{API_KEY}{params}{API_PASSPHRASE}"
+    sign = base64.b64encode(hmac.new(API_SECRET.encode(), sign_str.encode(), hashlib.sha256).digest()).decode()
+
+    headers = {
+        "ACCESS-KEY": API_KEY,
+        "ACCESS-SIGN": sign,
+        "ACCESS-TIMESTAMP": timestamp,
+        "ACCESS-PASSPHRASE": API_PASSPHRASE,
+        "Content-Type": "application/json"
+    }
+
     res = requests.get(url, headers=headers)
     data = res.json()
     logger.info(f"[get_margin_balance] Response: {data}")
-    if data["code"] != "00000":
+    if data.get("code") != "00000":
         raise ValueError("Margin API failed")
-    return float(data["data"]["available"])
+    return float(data["data"]["availableBalance"])
 
-# ---- 注文送信 ----
+# ---- 注文 ----
 def send_order(side, volatility):
     price = get_btc_price()
     margin = get_margin_balance()
@@ -70,38 +68,46 @@ def send_order(side, volatility):
     position_value = order_margin * LEVERAGE
     size = round(position_value / price, 4)
 
-    trail_width = max(float(volatility) * 1.5, 15)
+    trail_width = max(float(volatility) * 1.5, 15)  # bitgetの桁に注意
     stop_loss = round(price * 0.975, 2)
 
+    timestamp = str(int(time.time() * 1000))
+    path = "/api/mix/v1/order/placeOrder"
     body = {
         "symbol": SYMBOL,
         "marginCoin": "USDT",
-        "size": str(size),
         "side": side.lower(),
         "orderType": "market",
+        "size": str(size),
         "leverage": str(LEVERAGE),
-        "presetStopLossPrice": str(stop_loss),
-        "presetTrailingStop": {
-            "callbackRatio": str(round(trail_width / price * 100, 2))  # 例: 1% トレーリング
-        }
+        "stopLossPrice": str(stop_loss),
+        "triggerType": "fill_price"
+    }
+    body_json = json.dumps(body, separators=(',', ':'))
+    sign_str = f"{timestamp}{API_KEY}{body_json}{API_PASSPHRASE}"
+    sign = base64.b64encode(hmac.new(API_SECRET.encode(), sign_str.encode(), hashlib.sha256).digest()).decode()
+
+    headers = {
+        "ACCESS-KEY": API_KEY,
+        "ACCESS-SIGN": sign,
+        "ACCESS-TIMESTAMP": timestamp,
+        "ACCESS-PASSPHRASE": API_PASSPHRASE,
+        "Content-Type": "application/json"
     }
 
-    path = "/api/mix/v1/order/placeOrder"
-    body_json = json.dumps(body)
-    headers = make_headers("POST", path, body_json)
-
+    url = f"{BASE_URL}{path}"
     try:
-        res = requests.post(BASE_URL + path, headers=headers, data=body_json)
+        res = requests.post(url, headers=headers, data=body_json)
         logger.info(f"[send_order] Response: {res.status_code} {res.text}")
         return res.json()
     except Exception as e:
         logger.error(f"[send_order] Error: {e}")
         return {"status": "error", "message": str(e)}
 
-# ---- Webhookエンドポイント ----
+# ---- Webhookルート ----
 @app.route('/', methods=['GET'])
 def index():
-    return "Webhook Bot is running"
+    return "Bitget Webhook Bot is running"
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -137,4 +143,3 @@ def extract_volatility(payload):
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000)
-
