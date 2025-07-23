@@ -50,12 +50,13 @@ def get_btc_price() -> float:
         raise ValueError(f"Failed to get price: {data}")
     return float(data["data"]["last"])
 
-# ----- 証拠金取得 -----
+# ----- 証拠金取得（修正済み）-----
 def get_margin_balance() -> float:
     path = "/api/mix/v1/account/account"
-    query = f"symbol={SYMBOL}"
-    url = f"{BASE_URL}{path}?{query}"
-    headers = make_headers("GET", path, "")  # queryは署名に含めない
+    query = f"?symbol={SYMBOL}"
+    url = f"{BASE_URL}{path}{query}"
+    headers = make_headers("GET", path, "")  # クエリは署名に含めない！
+
     res = requests.get(url, headers=headers)
     data = res.json()
     logger.info(f"[get_margin_balance] Response: {data}")
