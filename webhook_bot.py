@@ -50,7 +50,7 @@ def get_margin_balance():
     path = "/api/mix/v1/account/account"
     query = f"symbol={SYMBOL}"
     url = f"{BASE_URL}{path}?{query}"
-    headers = make_headers("GET", path, query)
+    headers = make_headers("GET", path, "")  # クエリは署名に含めない
     res = requests.get(url, headers=headers)
     data = res.json()
     logger.info(f"[get_margin_balance] Response: {data}")
