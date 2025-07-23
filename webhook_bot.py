@@ -24,11 +24,22 @@ BASE_URL = "https://api.bitget.com"
 SYMBOL = "BTCUSDT_UMCBL"
 LEVERAGE = 2
 
-# ----- Bitget署名付きヘッダー作成 -----
+# ----- Bitgetサーバー時間取得 -----
+def get_server_time() -> int:
+    try:
+        url = f"{BASE_URL}/api/v2/public/time"
+        res = requests.get(url)
+        return int(res.json()["data"])
+    except Exception as e:
+        logger.warning(f"[get_server_time] Failed to get server time: {e}")
+        return int(time.time() * 1000)
+
+# ----- 署名付きヘッダー生成 -----
 def make_headers(method: str, path: str, body: str = "") -> dict:
-    timestamp = str(int(time.time() * 1000))
+    timestamp = str(get_server_time())
     message = f"{timestamp}{method.upper()}{path}{body}"
-    sign = hmac.new(API_SECRET.encode('utf-8'), message.encode('utf-8'), hashlib.sha256).hexdigest()
+    sign = hmac.new(API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
+
     headers = {
         "ACCESS-KEY": API_KEY,
         "ACCESS-SIGN": sign,
@@ -36,11 +47,14 @@ def make_headers(method: str, path: str, body: str = "") -> dict:
         "ACCESS-PASSPHRASE": API_PASSPHRASE,
         "Content-Type": "application/json"
     }
-    logger.debug(f"[make_headers] message={message}")
-    logger.debug(f"[make_headers] sign={sign}")
+
+    logger.debug(f"[make_headers] message: {message}")
+    logger.debug(f"[make_headers] sign: {sign}")
+    logger.debug(f"[make_headers] headers: {headers}")
+
     return headers
 
-# ----- 現在価格取得 -----
+# ----- BTC価格取得 -----
 def get_btc_price() -> float:
     url = f"{BASE_URL}/api/mix/v1/market/ticker?symbol={SYMBOL}"
     res = requests.get(url)
@@ -50,13 +64,14 @@ def get_btc_price() -> float:
         raise ValueError(f"Failed to get price: {data}")
     return float(data["data"]["last"])
 
-# ----- 証拠金取得（修正済み）-----
+# ----- 証拠金残高取得（署名完全準拠） -----
 def get_margin_balance() -> float:
     path = "/api/mix/v1/account/account"
     query = f"?symbol={SYMBOL}"
     url = f"{BASE_URL}{path}{query}"
-    headers = make_headers("GET", path, "")  # クエリは署名に含めない！
+    headers = make_headers("GET", path, "")  # ← クエリは署名に含めない
 
+    logger.debug(f"[get_margin_balance] URL: {url}")
     res = requests.get(url, headers=headers)
     data = res.json()
     logger.info(f"[get_margin_balance] Response: {data}")
@@ -91,14 +106,14 @@ def send_order(side: str, volatility: float) -> dict:
     headers = make_headers("POST", path, body_json)
 
     res = requests.post(f"{BASE_URL}{path}", headers=headers, data=body_json)
-    logger.info(f"[send_order] Request: {body}")
+    logger.info(f"[send_order] Request body: {body}")
     logger.info(f"[send_order] Response: {res.status_code} {res.text}")
     try:
         return res.json()
     except Exception:
         return {"status": "error", "message": "Invalid JSON response from Bitget"}
 
-# ----- VOL値抽出 -----
+# ----- VOL=xxx 抽出 -----
 def extract_volatility(payload: str) -> float:
     try:
         for token in payload.split():
@@ -109,7 +124,7 @@ def extract_volatility(payload: str) -> float:
         logger.error(f"[extract_volatility] Error: {e}")
         raise
 
-# ----- ルート確認 -----
+# ----- root確認 -----
 @app.route("/", methods=["GET"])
 def index():
     return "Bitget Webhook Bot is running."
@@ -139,6 +154,5 @@ def webhook():
 # ----- 起動 -----
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
-
 
 
