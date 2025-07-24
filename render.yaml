@@ -1,13 +1,15 @@
 services:
   - type: web
-    name: gmo-bot
+    name: gmo-bot  # ← 名前もわかりやすく変更すると吉
     env: python
-    plan: starter  # ← ここを starter に！
+    plan: starter
     buildCommand: ""
     startCommand: python webhook_bot.py
     envVars:
-      - key: GMO_API_KEY
+      - key: BITGET_API_KEY
         sync: false
-      - key: GMO_API_SECRET
+      - key: BITGET_API_SECRET
+        sync: false
+      - key: BITGET_API_PASSPHRASE
         sync: false
     autoDeploy: true
