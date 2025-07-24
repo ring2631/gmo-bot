@@ -8,11 +8,15 @@ import time
 import logging
 from dotenv import load_dotenv
 
-# ----- Flask初期化 -----
+# ----- 初期化 -----
 app = Flask(__name__)
 load_dotenv()
 
-# ----- 環境変数読み込み -----
+# ----- ログ設定 -----
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("webhook_bot")
+
+# ----- 環境変数 -----
 API_KEY = os.environ.get("BITGET_API_KEY")
 API_SECRET = os.environ.get("BITGET_API_SECRET")
 API_PASSPHRASE = os.environ.get("BITGET_API_PASSPHRASE")
@@ -20,25 +24,18 @@ BASE_URL = "https://api.bitget.com"
 SYMBOL = "BTCUSDT_UMCBL"
 LEVERAGE = 2
 
-# ----- ログ設定 -----
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("webhook_bot")
-
-# ----- 環境変数チェック -----
-logger.warning(f"[DEBUG] BITGET_API_KEY loaded: {API_KEY is not None}")
-logger.warning(f"[DEBUG] BITGET_API_SECRET loaded: {API_SECRET is not None}")
-logger.warning(f"[DEBUG] BITGET_API_PASSPHRASE loaded: {API_PASSPHRASE is not None}")
-
-# ----- 署名付きヘッダー作成 -----
-def make_headers(method: str, path: str, body: str = "") -> dict:
+# ----- Bitget署名付きヘッダー作成関数（修正済）-----
+def make_headers(method: str, path: str, body: str = "", query: str = "") -> dict:
     timestamp = str(int(time.time() * 1000))
-    message = f"{timestamp}{method.upper()}{path}{body}"
+    method = method.upper()
+    message_path = path + (f"?{query}" if query else "")
+    message = f"{timestamp}{method}{message_path}{body}"
     sign = hmac.new(API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
 
-    # ログ出力
     logger.warning(f"[SIGN DEBUG] timestamp: {timestamp}")
     logger.warning(f"[SIGN DEBUG] method: {method}")
     logger.warning(f"[SIGN DEBUG] path: {path}")
+    logger.warning(f"[SIGN DEBUG] query: {query}")
     logger.warning(f"[SIGN DEBUG] body: {body}")
     logger.warning(f"[SIGN DEBUG] message: {message}")
     logger.warning(f"[SIGN DEBUG] sign: {sign}")
@@ -61,12 +58,12 @@ def get_btc_price() -> float:
         raise ValueError(f"Failed to get price: {data}")
     return float(data["data"]["last"])
 
-# ----- 証拠金取得 -----
+# ----- 証拠金取得（署名修正）-----
 def get_margin_balance() -> float:
     path = "/api/mix/v1/account/account"
     query = f"symbol={SYMBOL}"
     url = f"{BASE_URL}{path}?{query}"
-    headers = make_headers("GET", path, "")
+    headers = make_headers("GET", path, "", query)
     res = requests.get(url, headers=headers)
     data = res.json()
     logger.info(f"[get_margin_balance] Response: {data}")
@@ -82,6 +79,7 @@ def send_order(side: str, volatility: float) -> dict:
     order_margin = margin * 0.35
     position_value = order_margin * LEVERAGE
     size = round(position_value / price, 3)
+
     trail_width = max(volatility * 1.5, 15)
     stop_loss = round(price * 0.975, 1)
 
@@ -99,6 +97,7 @@ def send_order(side: str, volatility: float) -> dict:
     }
     body_json = json.dumps(body)
     headers = make_headers("POST", path, body_json)
+
     res = requests.post(f"{BASE_URL}{path}", headers=headers, data=body_json)
     logger.info(f"[send_order] Response: {res.status_code} {res.text}")
     try:
@@ -117,7 +116,7 @@ def extract_volatility(payload: str) -> float:
         logger.error(f"[extract_volatility] Error: {e}")
         raise
 
-# ----- 動作確認用 -----
+# ----- ルート確認 -----
 @app.route("/", methods=["GET"])
 def index():
     return "Webhook Bot is running"
@@ -144,7 +143,8 @@ def webhook():
         logger.error(f"[webhook] Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# ----- エントリーポイント -----
+# ----- 起動 -----
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
 
