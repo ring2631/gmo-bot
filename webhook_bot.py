@@ -1,35 +1,35 @@
 from flask import Flask, request, jsonify
-import requests
-import hmac
-import hashlib
-import json
 import os
 import time
+import hmac
+import hashlib
+import requests
 import logging
 from dotenv import load_dotenv
 
-# ----- 初期化 -----
-app = Flask(__name__)
+# .envの読み込み
 load_dotenv()
 
-# ----- ログ設定 -----
+# ログ設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
-# ----- 環境変数 -----
-API_KEY = os.environ.get("BITGET_API_KEY")
-API_SECRET = os.environ.get("BITGET_API_SECRET")
-API_PASSPHRASE = os.environ.get("BITGET_API_PASSPHRASE")
+# Flask初期化
+app = Flask(__name__)
+
+# 環境変数
+API_KEY = os.getenv("BITGET_API_KEY")
+API_SECRET = os.getenv("BITGET_API_SECRET")
+API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
 BASE_URL = "https://api.bitget.com"
 SYMBOL = "BTCUSDT_UMCBL"
-LEVERAGE = 2
 
-# ----- Bitget署名付きヘッダー作成関数（修正済）-----
+# 署名作成
+
 def make_headers(method: str, path: str, body: str = "", query: str = "") -> dict:
     timestamp = str(int(time.time() * 1000))
-    method = method.upper()
     message_path = path + (f"?{query}" if query else "")
-    message = f"{timestamp}{method}{message_path}{body}"
+    message = f"{timestamp}{method.upper()}{message_path}{body}"
     sign = hmac.new(API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
 
     logger.warning(f"[SIGN DEBUG] timestamp: {timestamp}")
@@ -48,22 +48,21 @@ def make_headers(method: str, path: str, body: str = "", query: str = "") -> dic
         "Content-Type": "application/json"
     }
 
-# ----- 現在価格取得 -----
-def get_btc_price() -> float:
+# BTC価格取得
+
+def get_btc_price():
     url = f"{BASE_URL}/api/mix/v1/market/ticker?symbol={SYMBOL}"
     res = requests.get(url)
     data = res.json()
     logger.info(f"[get_btc_price] Response: {data}")
-    if data.get("code") != "00000":
-        raise ValueError(f"Failed to get price: {data}")
     return float(data["data"]["last"])
 
-# ----- 証拠金取得（署名修正）-----
-def get_margin_balance() -> float:
+# 証拠金取得 (symbolなし)
+
+def get_margin_balance():
     path = "/api/mix/v1/account/account"
-    query = f"symbol={SYMBOL}"
-    url = f"{BASE_URL}{path}?{query}"
-    headers = make_headers("GET", path, "", query)
+    url = f"{BASE_URL}{path}"
+    headers = make_headers("GET", path)
     res = requests.get(url, headers=headers)
     data = res.json()
     logger.info(f"[get_margin_balance] Response: {data}")
@@ -71,80 +70,35 @@ def get_margin_balance() -> float:
         raise ValueError(f"Margin API failed: {data.get('msg')}")
     return float(data["data"]["available"])
 
-# ----- 注文送信 -----
-def send_order(side: str, volatility: float) -> dict:
-    price = get_btc_price()
-    margin = get_margin_balance()
+# Webhook受信
 
-    order_margin = margin * 0.35
-    position_value = order_margin * LEVERAGE
-    size = round(position_value / price, 3)
-
-    trail_width = max(volatility * 1.5, 15)
-    stop_loss = round(price * 0.975, 1)
-
-    path = "/api/mix/v1/order/place-order"
-    body = {
-        "symbol": SYMBOL,
-        "marginCoin": "USDT",
-        "size": str(size),
-        "side": side.lower(),
-        "orderType": "market",
-        "tradeSide": side.lower(),
-        "leverage": str(LEVERAGE),
-        "presetStopLossPrice": str(stop_loss),
-        "presetTrailingStopCallbackRate": str(round(trail_width / price, 4))
-    }
-    body_json = json.dumps(body)
-    headers = make_headers("POST", path, body_json)
-
-    res = requests.post(f"{BASE_URL}{path}", headers=headers, data=body_json)
-    logger.info(f"[send_order] Response: {res.status_code} {res.text}")
-    try:
-        return res.json()
-    except Exception:
-        return {"status": "error", "message": "Invalid JSON response from Bitget"}
-
-# ----- VOL抽出 -----
-def extract_volatility(payload: str) -> float:
-    try:
-        for token in payload.split():
-            if token.startswith("VOL="):
-                return float(token.replace("VOL=", ""))
-        raise ValueError("VOL=xxxx が見つかりません")
-    except Exception as e:
-        logger.error(f"[extract_volatility] Error: {e}")
-        raise
-
-# ----- ルート確認 -----
-@app.route("/", methods=["GET"])
-def index():
-    return "Webhook Bot is running"
-
-# ----- Webhook受信 -----
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        raw_data = request.get_data(as_text=True).strip()
+        raw_data = request.data.decode("utf-8")
         logger.info(f"[webhook] Raw data: '{raw_data}'")
 
         if "BUY" in raw_data:
             logger.info("[webhook] Detected BUY signal")
-            vol = extract_volatility(raw_data)
-            return jsonify(send_order("BUY", vol))
-        elif "SELL" in raw_data:
-            logger.info("[webhook] Detected SELL signal")
-            vol = extract_volatility(raw_data)
-            return jsonify(send_order("SELL", vol))
+            price = get_btc_price()
+            balance = get_margin_balance()
+            logger.info(f"[webhook] Current price: {price}, Balance: {balance}")
+            return jsonify({"status": "success", "price": price, "balance": balance})
         else:
-            logger.warning("[webhook] Invalid signal received")
-            return jsonify({"status": "ignored"}), 400
+            logger.info("[webhook] No BUY signal detected")
+            return jsonify({"status": "ignored"})
+
     except Exception as e:
         logger.error(f"[webhook] Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# ----- 起動 -----
+# index
+
+@app.route("/")
+def index():
+    return "Bitget Webhook Bot is running."
+
+# ローカルサーバー
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
-
 
