@@ -22,6 +22,19 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
+# ---- Get Bitget Server Timestamp ----
+def get_server_timestamp():
+    try:
+        res = requests.get(f"{BASE_URL}/api/mix/v1/market/time")
+        data = res.json()
+        timestamp = str(data["data"])
+        logger.debug(f"[get_server_timestamp] Bitget server time: {timestamp}")
+        return timestamp
+    except Exception as e:
+        logger.error(f"[get_server_timestamp] Failed to fetch: {e}")
+        # Fallback to local time if API fails
+        return str(int(time.time() * 1000))
+
 # ---- Signature Function ----
 def generate_signature(timestamp, method, path, query_string="", body=""):
     if method in ["GET", "DELETE"]:
@@ -33,7 +46,7 @@ def generate_signature(timestamp, method, path, query_string="", body=""):
 
 # ---- Header Function ----
 def make_headers(method, path, query_string="", body=""):
-    timestamp = str(int(time.time() * 1000))
+    timestamp = get_server_timestamp()
     sign = generate_signature(timestamp, method, path, query_string, body)
     headers = {
         "ACCESS-KEY": API_KEY,
@@ -84,7 +97,6 @@ def webhook():
             logger.info("[webhook] Detected BUY signal")
             price = get_btc_price()
             margin = get_margin_balance()
-            # 必要に応じて計算処理
             execute_order(volume=0.01)
             return jsonify({"status": "success"}), 200
         return jsonify({"status": "ignored"}), 200
