@@ -29,7 +29,7 @@ def get_server_time() -> int:
     try:
         url = f"{BASE_URL}/api/v2/public/time"
         res = requests.get(url)
-        return int(res.json()["data"])
+        return int(res.json()["data"]["serverTime"])  # ← 修正ポイント！
     except Exception as e:
         logger.warning(f"[get_server_time] Failed to get server time: {e}")
         return int(time.time() * 1000)
@@ -64,12 +64,12 @@ def get_btc_price() -> float:
         raise ValueError(f"Failed to get price: {data}")
     return float(data["data"]["last"])
 
-# ----- 証拠金残高取得（署名完全準拠） -----
+# ----- 証拠金残高取得 -----
 def get_margin_balance() -> float:
     path = "/api/mix/v1/account/account"
     query = f"?symbol={SYMBOL}"
     url = f"{BASE_URL}{path}{query}"
-    headers = make_headers("GET", path, "")  # ← クエリは署名に含めない
+    headers = make_headers("GET", path, "")  # クエリは署名に含めない
 
     logger.debug(f"[get_margin_balance] URL: {url}")
     res = requests.get(url, headers=headers)
