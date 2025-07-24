@@ -12,13 +12,13 @@ from dotenv import load_dotenv
 app = Flask(__name__)
 load_dotenv()
 
-logger.warning(f"[DEBUG] BITGET_API_KEY loaded: {API_KEY is not None}")
-logger.warning(f"[DEBUG] BITGET_API_SECRET loaded: {API_SECRET is not None}")
-logger.warning(f"[DEBUG] BITGET_API_PASSPHRASE loaded: {API_PASSPHRASE is not None}")
-
 # ----- ログ設定 -----
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
+
+logger.warning(f"[DEBUG] BITGET_API_KEY loaded: {API_KEY is not None}")
+logger.warning(f"[DEBUG] BITGET_API_SECRET loaded: {API_SECRET is not None}")
+logger.warning(f"[DEBUG] BITGET_API_PASSPHRASE loaded: {API_PASSPHRASE is not None}")
 
 # ----- 環境変数 -----
 API_KEY = os.environ.get("BITGET_API_KEY")
