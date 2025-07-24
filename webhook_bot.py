@@ -29,30 +29,33 @@ def get_server_time() -> int:
     try:
         url = f"{BASE_URL}/api/v2/public/time"
         res = requests.get(url)
-        return int(res.json()["data"]["serverTime"])  # ← 修正ポイント！
+        return int(res.json()["data"]["serverTime"])  # 修正済み
     except Exception as e:
         logger.warning(f"[get_server_time] Failed to get server time: {e}")
         return int(time.time() * 1000)
 
-# ----- 署名付きヘッダー生成 -----
+# ----- 署名付きヘッダー生成（署名デバッグ付き） -----
 def make_headers(method: str, path: str, body: str = "") -> dict:
     timestamp = str(get_server_time())
-    message = f"{timestamp}{method.upper()}{path}{body}"
+    method_upper = method.upper()
+    message = f"{timestamp}{method_upper}{path}{body}"
     sign = hmac.new(API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
 
-    headers = {
+    # 🔍 デバッグログ追加（署名検証用）
+    logger.warning(f"[SIGN DEBUG] timestamp: {timestamp}")
+    logger.warning(f"[SIGN DEBUG] method: {method_upper}")
+    logger.warning(f"[SIGN DEBUG] path: {path}")
+    logger.warning(f"[SIGN DEBUG] body: {body}")
+    logger.warning(f"[SIGN DEBUG] message: {message}")
+    logger.warning(f"[SIGN DEBUG] sign: {sign}")
+
+    return {
         "ACCESS-KEY": API_KEY,
         "ACCESS-SIGN": sign,
         "ACCESS-TIMESTAMP": timestamp,
         "ACCESS-PASSPHRASE": API_PASSPHRASE,
         "Content-Type": "application/json"
     }
-
-    logger.debug(f"[make_headers] message: {message}")
-    logger.debug(f"[make_headers] sign: {sign}")
-    logger.debug(f"[make_headers] headers: {headers}")
-
-    return headers
 
 # ----- BTC価格取得 -----
 def get_btc_price() -> float:
@@ -102,11 +105,11 @@ def send_order(side: str, volatility: float) -> dict:
         "presetStopLossPrice": str(stop_loss),
         "presetTrailingStopCallbackRate": str(round(trail_width / price, 4))
     }
-    body_json = json.dumps(body)
+    body_json = json.dumps(body, separators=(',', ':'))  # ← ← ← ← ★重要★ JSONを圧縮して空白除去！
     headers = make_headers("POST", path, body_json)
 
     res = requests.post(f"{BASE_URL}{path}", headers=headers, data=body_json)
-    logger.info(f"[send_order] Request body: {body}")
+    logger.info(f"[send_order] Request body: {body_json}")
     logger.info(f"[send_order] Response: {res.status_code} {res.text}")
     try:
         return res.json()
