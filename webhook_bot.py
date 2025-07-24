@@ -17,7 +17,7 @@ API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
 BASE_URL = "https://api.bitget.com"
 SYMBOL = "BTCUSDT_UMCBL"
 
-# Initialize app and logger
+# Initialize Flask and logging
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
@@ -25,18 +25,23 @@ logger = logging.getLogger("webhook_bot")
 # ---- Get Bitget Server Timestamp ----
 def get_server_timestamp():
     try:
-        res = requests.get(f"{BASE_URL}/api/mix/v1/market/time")
+        res = requests.get(f"{BASE_URL}/api/mix/v1/market/time", timeout=2)
+        res.raise_for_status()
         data = res.json()
-        timestamp = str(data["data"])
-        logger.debug(f"[get_server_timestamp] Bitget server time: {timestamp}")
-        return timestamp
+        if data["code"] == "00000":
+            timestamp = str(data["data"])
+            logger.debug(f"[get_server_timestamp] Bitget server time: {timestamp}")
+            return timestamp
+        else:
+            raise ValueError("Bitget time API error")
     except Exception as e:
-        logger.error(f"[get_server_timestamp] Failed to fetch: {e}")
-        # Fallback to local time if API fails
+        logger.warning(f"[get_server_timestamp] Failed to get server time, fallback to local. Error: {e}")
         return str(int(time.time() * 1000))
 
-# ---- Signature Function ----
+# ---- Signature Generator ----
 def generate_signature(timestamp, method, path, query_string="", body=""):
+    if not timestamp:
+        raise ValueError("Missing timestamp for signature.")
     if method in ["GET", "DELETE"]:
         message = f"{timestamp}{method}{path}{query_string}"
     else:
@@ -44,7 +49,7 @@ def generate_signature(timestamp, method, path, query_string="", body=""):
     logger.warning(f"[SIGN DEBUG] message: {message}")
     return hmac.new(API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
 
-# ---- Header Function ----
+# ---- Header Generator ----
 def make_headers(method, path, query_string="", body=""):
     timestamp = get_server_timestamp()
     sign = generate_signature(timestamp, method, path, query_string, body)
@@ -81,13 +86,13 @@ def get_margin_balance():
         raise Exception(f"Margin API failed: {data['msg']}")
     return data['data']
 
-# ---- Execute Order (Mockup) ----
+# ---- Execute Order (仮処理) ----
 def execute_order(volume):
     logger.info(f"Executing order with volume: {volume}")
-    # 実際の注文処理はここに記述（今は割愛）
+    # 実際の注文処理を書く場所（必要なら実装支援するよ）
     return True
 
-# ---- Webhook ----
+# ---- Webhook Handler ----
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
@@ -97,6 +102,7 @@ def webhook():
             logger.info("[webhook] Detected BUY signal")
             price = get_btc_price()
             margin = get_margin_balance()
+            logger.info(f"[webhook] Price: {price}, Margin: {margin}")
             execute_order(volume=0.01)
             return jsonify({"status": "success"}), 200
         return jsonify({"status": "ignored"}), 200
@@ -104,9 +110,11 @@ def webhook():
         logger.error(f"[webhook] Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# ---- Health Check ----
 @app.route("/")
 def home():
     return "Bitget Webhook Bot is running!"
 
+# ---- Run Flask ----
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
