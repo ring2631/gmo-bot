@@ -5,21 +5,24 @@ from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from pybitget import Client  # pip install python-bitget
 
-# ---- 環境変数ロード ----
+# ---- 環境変数 ----
 load_dotenv()
 API_KEY = os.getenv("BITGET_API_KEY")
 API_SECRET = os.getenv("BITGET_API_SECRET")
 API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
 
+# ---- 設定 ----
 SYMBOL = "BTCUSDT_UMCBL"
 MARGIN_COIN = "USDT"
+RISK_RATIO = 0.35
+LEVERAGE = 2
 
-# ---- Flask & ロガー初期化 ----
+# ---- Flask & ロガー ----
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
-# ---- Bitgetクライアント初期化 ----
+# ---- Bitgetクライアント ----
 client = Client(
     api_key=API_KEY,
     api_secret_key=API_SECRET,
@@ -38,16 +41,25 @@ def get_margin_balance():
     logger.info(f"[get_margin_balance] Account: {res}")
     return res["data"]
 
-# ---- 注文処理（本番）----
-def execute_order(volume):
+# ---- 注文処理（証拠金ベースでサイズ計算）----
+def execute_order(volatility):
+    btc_price = get_btc_price()
+    margin = get_margin_balance()
+    usdt_equity = float(margin["usdtEquity"])
+
+    # 証拠金 × RISK × LEVERAGE ÷ 現在価格
+    order_size = round((usdt_equity * RISK_RATIO * LEVERAGE) / btc_price, 4)
+    logger.info(f"[execute_order] Calculated order size: {order_size} BTC")
+
+    # 実行（トレイリングなどの反映はこのvolatilityで調整可）
     try:
         order = client.mix_place_order(
             symbol=SYMBOL,
             marginCoin=MARGIN_COIN,
-            side="open_long",           # ロングポジションを建てる
-            orderType="market",         # 成行
-            size=str(volume),           # 取引数量
-            price="",                   # 成行のため空
+            side="open_long",
+            orderType="market",
+            size=str(order_size),
+            price="",  # 成行
             timeInForceValue="normal"
         )
         logger.info(f"[execute_order] Order placed: {order}")
@@ -56,7 +68,7 @@ def execute_order(volume):
         logger.error(f"[execute_order] Order failed: {e}")
         raise
 
-# ---- Webhookハンドラー ----
+# ---- Webhookエンドポイント ----
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
@@ -67,14 +79,10 @@ def webhook():
             logger.info("[webhook] BUY signal detected")
 
             match = re.search(r"VOL\s*=\s*([0-9.]+)", raw)
-            volume = float(match.group(1)) if match else 0.01
-            logger.info(f"[webhook] Extracted volume: {volume}")
+            volatility = float(match.group(1)) if match else 100.0
+            logger.info(f"[webhook] Extracted volatility: {volatility}")
 
-            price = get_btc_price()
-            margin = get_margin_balance()
-            logger.info(f"[webhook] Price={price}, Margin={margin}")
-
-            result = execute_order(volume)
+            result = execute_order(volatility)
             return jsonify({"status": "success", "order": result}), 200
 
         return jsonify({"status": "ignored"}), 200
@@ -85,7 +93,7 @@ def webhook():
 
 @app.route("/")
 def home():
-    return "Bitget Webhook Bot is LIVE and Ready!"
+    return "Bitget Webhook Bot is Running!"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
