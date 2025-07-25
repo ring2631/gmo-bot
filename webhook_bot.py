@@ -47,11 +47,23 @@ def execute_order(volatility):
     margin = get_margin_balance()
     usdt_equity = float(margin["usdtEquity"])
 
-    # 証拠金 × RISK × LEVERAGE ÷ 現在価格
-    order_size = round((usdt_equity * RISK_RATIO * LEVERAGE) / btc_price, 4)
+    # 証拠金 × RISK × LEVERAGE ÷ 現在価格 → 注文サイズ
+    order_margin = usdt_equity * RISK_RATIO
+    position_value = order_margin * LEVERAGE
+    order_size = round(position_value / btc_price, 3)
     logger.info(f"[execute_order] Calculated order size: {order_size} BTC")
 
-    # 実行（トレイリングなどの反映はこのvolatilityで調整可）
+    if order_size <= 0:
+        raise ValueError("Order size is zero or less. Skipping order.")
+
+    # Stop Loss（現在価格の 2.5% 下）
+    stop_loss_price = round(btc_price * 0.975, 1)
+
+    # Trailing Stop（VOL × 1.5 or 15 のうち大きい方 → USD幅 → 割合に変換）
+    trail_width = max(volatility * 1.5, 15)
+    callback_rate = round(trail_width / btc_price, 4)
+
+    # 実行
     try:
         order = client.mix_place_order(
             symbol=SYMBOL,
@@ -60,13 +72,16 @@ def execute_order(volatility):
             orderType="market",
             size=str(order_size),
             price="",  # 成行
-            timeInForceValue="normal"
+            timeInForceValue="normal",
+            presetStopLossPrice=str(stop_loss_price),
+            presetTrailingStopCallbackRate=str(callback_rate)
         )
         logger.info(f"[execute_order] Order placed: {order}")
         return order
     except Exception as e:
         logger.error(f"[execute_order] Order failed: {e}")
         raise
+
 
 # ---- Webhookエンドポイント ----
 @app.route("/webhook", methods=["POST"])
