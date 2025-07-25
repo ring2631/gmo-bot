@@ -2,12 +2,11 @@ import os
 import logging
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
-from bitget.rest.bitget_rest import Bitget
+from python_bitget import Client  # ← pip install python-bitget が必要
 
 # 環境変数読み込み
 load_dotenv()
 
-# Bitget APIキー類
 API_KEY = os.getenv("BITGET_API_KEY")
 API_SECRET = os.getenv("BITGET_API_SECRET")
 API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
@@ -18,33 +17,33 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
-# Bitgetクライアント初期化（自動で署名・サーバー時刻対応）
-client = Bitget(
+# Bitgetクライアント初期化（署名・時刻同期も自動でやってくれる）
+client = Client(
     api_key=API_KEY,
-    api_secret_key=API_SECRET,
+    secret_key=API_SECRET,
     passphrase=API_PASSPHRASE,
     use_server_time=True
 )
 
-# ---- 現在価格取得 ----
+# ---- BTC価格取得 ----
 def get_btc_price():
     res = client.mix_get_market_ticker(symbol=SYMBOL)
     logger.info(f"[get_btc_price] Response: {res}")
     return float(res["data"]["last"])
 
-# ---- 証拠金取得 ----
+# ---- 証拠金取得（口座情報）----
 def get_margin_balance():
     res = client.mix_get_account(symbol=SYMBOL)
     logger.info(f"[get_margin_balance] Response: {res}")
     return res["data"]
 
-# ---- 発注処理（ダミー）----
+# ---- 仮注文関数（本番化予定）----
 def execute_order(volume):
     logger.info(f"[execute_order] Volume: {volume}")
-    # 本番では client.mix_place_order(...) をここで使う
+    # 将来ここで client.mix_place_order(...) を使って注文を出す
     return True
 
-# ---- Webhookエンドポイント ----
+# ---- Webhook処理 ----
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
@@ -62,7 +61,7 @@ def webhook():
         logger.error(f"[webhook] Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# ---- 簡易ヘルスチェック ----
+# ---- 簡易表示 ----
 @app.route("/")
 def home():
     return "Bitget SDK Webhook Bot is running!"
@@ -70,3 +69,4 @@ def home():
 # ---- 実行 ----
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
