@@ -2,11 +2,10 @@ import os
 import logging
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
-from python_bitget import Client  # ← pip install python-bitget が必要
+from bitget import Client  # ← 正しいインポート
 
 # 環境変数読み込み
 load_dotenv()
-
 API_KEY = os.getenv("BITGET_API_KEY")
 API_SECRET = os.getenv("BITGET_API_SECRET")
 API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
@@ -17,33 +16,34 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
-# Bitgetクライアント初期化（署名・時刻同期も自動でやってくれる）
+# Bitgetクライアント初期化
 client = Client(
     api_key=API_KEY,
-    secret_key=API_SECRET,
+    api_secret=API_SECRET,
     passphrase=API_PASSPHRASE,
     use_server_time=True
 )
 
 # ---- BTC価格取得 ----
 def get_btc_price():
-    res = client.mix_get_market_ticker(symbol=SYMBOL)
-    logger.info(f"[get_btc_price] Response: {res}")
-    return float(res["data"]["last"])
+    res = client.mix_get_accounts(productType="UMCBL")  # 証拠金取得に混在する API
+    price_res = client.mix_get_market_ticker(symbol=SYMBOL)
+    logger.info(f"[get_btc_price] price_response: {price_res}")
+    return float(price_res["data"]["last"])
 
-# ---- 証拠金取得（口座情報）----
+# ---- 証拠金取得 ----
 def get_margin_balance():
-    res = client.mix_get_account(symbol=SYMBOL)
-    logger.info(f"[get_margin_balance] Response: {res}")
+    res = client.mix_get_accounts(productType="UMCBL")  # productType に注意
+    logger.info(f"[get_margin_balance] account_response: {res}")
     return res["data"]
 
-# ---- 仮注文関数（本番化予定）----
+# ---- 仮注文関数 ----
 def execute_order(volume):
     logger.info(f"[execute_order] Volume: {volume}")
-    # 将来ここで client.mix_place_order(...) を使って注文を出す
+    # 本番は client.mix_place_order(...) で注文出せるよ
     return True
 
-# ---- Webhook処理 ----
+# ---- Webhookエンドポイント ----
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
@@ -61,12 +61,10 @@ def webhook():
         logger.error(f"[webhook] Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# ---- 簡易表示 ----
 @app.route("/")
 def home():
     return "Bitget SDK Webhook Bot is running!"
 
-# ---- 実行 ----
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
 
