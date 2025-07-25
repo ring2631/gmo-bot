@@ -2,26 +2,22 @@ from flask import Flask, request, jsonify
 import logging
 import os
 from dotenv import load_dotenv
-from bitget import Client
+from python_bitget import Client
 
-# ----- 初期化 -----
 app = Flask(__name__)
 load_dotenv()
 
-# ----- ログ設定 -----
+# ----- ログ -----
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
 # ----- 環境変数 -----
-API_KEY = os.getenv("BITGET_API_KEY")
-API_SECRET = os.getenv("BITGET_API_SECRET")
-API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
+API_KEY = os.environ.get("BITGET_API_KEY")
+API_SECRET = os.environ.get("BITGET_API_SECRET")
+API_PASSPHRASE = os.environ.get("BITGET_API_PASSPHRASE")
 SYMBOL = "BTCUSDT_UMCBL"
-MARGIN_COIN = "USDT"
 LEVERAGE = 2
-RISK_RATIO = 0.35
 
-# ----- Bitget SDKクライアント -----
 client = Client(
     api_key=API_KEY,
     api_secret_key=API_SECRET,
@@ -33,86 +29,90 @@ client = Client(
 def get_btc_price():
     ticker = client.mix_get_market_ticker(symbol=SYMBOL)
     logger.info(f"[get_btc_price] Ticker: {ticker}")
-    return float(ticker['data']['last'])
+    return float(ticker["data"]["last"])
 
 # ----- 証拠金取得 -----
 def get_margin_balance():
-    result = client.mix_get_account(symbol=SYMBOL)
-    logger.info(f"[get_margin_balance] Account: {result}")
-    return float(result['data']['usdtEquity'])
+    account = client.mix_get_account(symbol=SYMBOL)
+    logger.info(f"[get_margin_balance] Account: {account}")
+    return float(account["data"]["available"])
 
-# ----- 注文送信 -----
+# ----- 注文処理 -----
 def execute_order(side, volatility):
     price = get_btc_price()
-    equity = get_margin_balance()
+    margin = get_margin_balance()
 
-    order_margin = equity * RISK_RATIO
+    order_margin = margin * 0.35
     position_value = order_margin * LEVERAGE
-    order_size = round(position_value / price, 3)
-    logger.info(f"[execute_order] Calculated order size: {order_size} BTC")
-
-    if order_size <= 0:
-        logger.warning("[execute_order] Order size is 0. Skip.")
-        return {"status": "skipped", "reason": "Insufficient equity"}
+    size = round(position_value / price, 3)
 
     trail_width = max(float(volatility) * 1.5, 15)
     callback_rate = round(trail_width / price, 4)
     stop_loss = round(price * 0.975, 1)
 
+    logger.info(f"[execute_order] Price={price}, Size={size}, Callback={callback_rate}, SL={stop_loss}")
+
     try:
         res = client.mix_place_order(
             symbol=SYMBOL,
-            marginCoin=MARGIN_COIN,
-            side="open_long" if side == "BUY" else "open_short",
+            marginCoin="USDT",
+            size=str(size),
+            side=side.lower(),
             orderType="market",
-            size=str(order_size),
+            tradeSide=side.lower(),
+            leverage=str(LEVERAGE),
             presetStopLossPrice=str(stop_loss),
-            presetTrailingStopCallbackRate=str(callback_rate),
-            timeInForceValue="normal"
+            presetTrailingStopCallbackRate=str(callback_rate)
         )
-        logger.info(f"[execute_order] Order response: {res}")
+        logger.info(f"[execute_order] Response: {res}")
         return res
     except Exception as e:
         logger.error(f"[execute_order] Order failed: {e}")
         raise
 
-# ----- VOL=xxxx抽出 -----
+# ----- VOL抽出 -----
 def extract_volatility(payload):
     try:
         for token in payload.split():
             if token.startswith("VOL="):
                 return float(token.replace("VOL=", ""))
-        raise ValueError("VOL=xxxx not found")
+        raise ValueError("VOL=xxxx が見つかりません")
     except Exception as e:
         logger.error(f"[extract_volatility] Error: {e}")
         raise
 
-# ----- Webhook処理 -----
+# ----- 動作確認 -----
+@app.route("/", methods=["GET"])
+def index():
+    return "Webhook Bot is running"
+
+# ----- Webhook -----
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        raw = request.get_data(as_text=True)
-        logger.info(f"[webhook] Raw: {raw}")
+        raw_data = request.get_data(as_text=True)
+        logger.info(f"[webhook] Raw: {raw_data}")
 
-        if "BUY" in raw:
+        if "BUY" in raw_data:
             logger.info("[webhook] BUY signal detected")
-            vol = extract_volatility(raw)
-            return jsonify(execute_order("BUY", vol))
-        elif "SELL" in raw:
+            vol = extract_volatility(raw_data)
+            logger.info(f"[webhook] Extracted volatility: {vol}")
+            result = execute_order("BUY", vol)
+            return jsonify(result)
+        elif "SELL" in raw_data:
             logger.info("[webhook] SELL signal detected")
-            vol = extract_volatility(raw)
-            return jsonify(execute_order("SELL", vol))
+            vol = extract_volatility(raw_data)
+            logger.info(f"[webhook] Extracted volatility: {vol}")
+            result = execute_order("SELL", vol)
+            return jsonify(result)
         else:
-            logger.warning("[webhook] Invalid signal")
+            logger.warning("[webhook] Unknown signal")
             return jsonify({"status": "ignored"}), 400
     except Exception as e:
         logger.error(f"[webhook] Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route("/")
-def root():
-    return "Webhook bot is running."
-
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
 
