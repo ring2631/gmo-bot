@@ -5,29 +5,28 @@ from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from pybitget import Client  # pip install python-bitget
 
-# 環境変数読み込み
+# ---- 環境変数ロード ----
 load_dotenv()
 API_KEY = os.getenv("BITGET_API_KEY")
 API_SECRET = os.getenv("BITGET_API_SECRET")
 API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
 
-# ✅ Mix契約のUSDT建てペア
 SYMBOL = "BTCUSDT_UMCBL"
-PRODUCT_TYPE = "UMCBL"
+MARGIN_COIN = "USDT"
 
-# Flask 初期化 & ログ設定
+# ---- Flask & ロガー初期化 ----
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
-# Bitgetクライアント初期化
+# ---- Bitgetクライアント初期化 ----
 client = Client(
     api_key=API_KEY,
-    api_secret_key=API_SECRET,  # ← 正しい引数名
+    api_secret_key=API_SECRET,
     passphrase=API_PASSPHRASE
 )
 
-# ---- 現在価格取得 ----
+# ---- BTC価格取得 ----
 def get_btc_price():
     ticker = client.mix_get_single_symbol_ticker(symbol=SYMBOL)
     logger.info(f"[get_btc_price] Ticker: {ticker}")
@@ -35,17 +34,29 @@ def get_btc_price():
 
 # ---- 証拠金取得 ----
 def get_margin_balance():
-    res = client.mix_get_account(symbol=SYMBOL, productType=PRODUCT_TYPE)
+    res = client.mix_get_account(symbol=SYMBOL, marginCoin=MARGIN_COIN)
     logger.info(f"[get_margin_balance] Account: {res}")
     return res["data"]
 
-# ---- 仮注文処理 ----
+# ---- 注文処理（本番）----
 def execute_order(volume):
-    logger.info(f"[execute_order] Volume: {volume}")
-    # ※本番ではここに client.mix_place_order(...) を追加
-    return True
+    try:
+        order = client.mix_place_order(
+            symbol=SYMBOL,
+            marginCoin=MARGIN_COIN,
+            side="open_long",           # ロングポジションを建てる
+            orderType="market",         # 成行
+            size=str(volume),           # 取引数量
+            price="",                   # 成行のため空
+            timeInForceValue="normal"
+        )
+        logger.info(f"[execute_order] Order placed: {order}")
+        return order
+    except Exception as e:
+        logger.error(f"[execute_order] Order failed: {e}")
+        raise
 
-# ---- Webhook受信エンドポイント ----
+# ---- Webhookハンドラー ----
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
@@ -55,7 +66,6 @@ def webhook():
         if "BUY" in raw:
             logger.info("[webhook] BUY signal detected")
 
-            # VOL=xxx を抽出
             match = re.search(r"VOL\s*=\s*([0-9.]+)", raw)
             volume = float(match.group(1)) if match else 0.01
             logger.info(f"[webhook] Extracted volume: {volume}")
@@ -64,8 +74,8 @@ def webhook():
             margin = get_margin_balance()
             logger.info(f"[webhook] Price={price}, Margin={margin}")
 
-            execute_order(volume)
-            return jsonify({"status": "success"}), 200
+            result = execute_order(volume)
+            return jsonify({"status": "success", "order": result}), 200
 
         return jsonify({"status": "ignored"}), 200
 
@@ -73,10 +83,9 @@ def webhook():
         logger.error(f"[webhook] Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# ---- ヘルスチェック ----
 @app.route("/")
 def home():
-    return "Bitget Webhook Bot is running!"
+    return "Bitget Webhook Bot is LIVE and Ready!"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
