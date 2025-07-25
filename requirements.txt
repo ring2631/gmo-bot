@@ -1,4 +1,4 @@
 flask
 requests
 python-dotenv
-bitget-python-sdk
+git+https://github.com/bitget-exchange/bitget-api-sdk-python.git
