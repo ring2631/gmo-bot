@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 import os
 import logging
 from dotenv import load_dotenv
-from pybitget import Client  # ← python-bitget を使用
+from pybitget.client import MixClient  # ← pybitget の正しいインポート
 
 # 初期化
 app = Flask(__name__)
@@ -18,9 +18,9 @@ API_SECRET = os.getenv("BITGET_API_SECRET")
 API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
 
 # クライアント初期化
-client = Client(
+client = MixClient(
     api_key=API_KEY,
-    api_secret_key=API_SECRET,
+    api_secret=API_SECRET,
     passphrase=API_PASSPHRASE,
     use_server_time=False  # レンダーで時間ズレ対策済みならTrueも可
 )
@@ -41,13 +41,13 @@ def extract_volatility(payload: str) -> float:
 
 # 現在価格取得
 def get_btc_price():
-    ticker = client.mix_market_api.get_ticker({'symbol': SYMBOL})
+    ticker = client.get_ticker(symbol=SYMBOL)
     logger.info(f"[get_btc_price] Ticker: {ticker}")
     return float(ticker['data']['last'])
 
 # 証拠金情報取得
 def get_margin_balance():
-    account = client.mix_account_api.get_account({'symbol': SYMBOL})
+    account = client.get_account(symbol=SYMBOL)
     logger.info(f"[get_margin_balance] Account: {account}")
     return float(account['data']['available'])
 
@@ -76,7 +76,7 @@ def execute_order(side: str, volatility: float):
         "presetTrailingStopCallbackRate": str(callback_rate)
     }
 
-    res = client.mix_order_api.place_order(body)
+    res = client.place_order(body)
     logger.info(f"[execute_order] Response: {res}")
     return res
 
@@ -104,5 +104,4 @@ def webhook():
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000)
-
 
