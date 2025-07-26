@@ -8,18 +8,18 @@ import re
 import json
 from flask import Flask, request, jsonify
 
-# --- 環境変数（Render上で設定） ---
+# --- 環境変数（Render等で設定） ---
 API_KEY = os.environ["BITGET_API_KEY"]
 API_SECRET = os.environ["BITGET_API_SECRET"]
 API_PASSPHRASE = os.environ["BITGET_API_PASSPHRASE"]
 
-# --- 固定設定 ---
+# --- 設定 ---
 SYMBOL = "BTCUSDT_UMCBL"
 MARGIN_COIN = "USDT"
 RISK_RATIO = 0.35
 LEVERAGE = 2
 
-# --- Flask初期化 ---
+# --- Flask 初期化 ---
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
@@ -28,14 +28,11 @@ logger = logging.getLogger("webhook_bot")
 # --- Bitget署名付きヘッダー生成 ---
 def make_headers(method, path, query="", body=""):
     timestamp = str(int(time.time() * 1000))
-
     full_path = f"{path}?{query}" if method.upper() in ["GET", "DELETE"] and query else path
-    final_body = body or ""
-
-    prehash = f"{timestamp}{method.upper()}{full_path}{final_body}"
+    prehash = f"{timestamp}{method.upper()}{full_path}{body or ''}"
     sign = hmac.new(
-        bytes(API_SECRET, encoding='utf-8'),
-        bytes(prehash, encoding='utf-8'),
+        API_SECRET.encode(),
+        prehash.encode(),
         hashlib.sha256
     ).hexdigest()
 
@@ -48,7 +45,7 @@ def make_headers(method, path, query="", body=""):
     }
 
 
-# --- 現在のBTC価格取得 ---
+# --- BTC現在価格取得 ---
 def get_btc_price():
     path = "/api/mix/v1/market/ticker"
     query = f"symbol={SYMBOL}"
@@ -59,20 +56,21 @@ def get_btc_price():
     return float(res["data"]["last"])
 
 
-# --- 証拠金取得（symbolは使わない） ---
+# --- 証拠金取得（POST方式で署名回避） ---
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
-    query = f"marginCoin={MARGIN_COIN}"
-    url = f"https://api.bitget.com{path}?{query}"
-    headers = make_headers("GET", path, query=query)
-    res = requests.get(url, headers=headers).json()
+    url = f"https://api.bitget.com{path}"
+    body_dict = {"marginCoin": MARGIN_COIN}
+    body = json.dumps(body_dict)
+    headers = make_headers("POST", path, body=body)
+    res = requests.post(url, headers=headers, data=body).json()
     logger.info(f"[get_margin_balance] Account: {res}")
     if res["code"] != "00000":
         raise Exception(f"Margin API error: {res['msg']}")
     return float(res["data"]["usdtEquity"])
 
 
-# --- トレイリング付き注文実行 ---
+# --- 注文実行（トレイリングストップ付き） ---
 def execute_order(volatility):
     btc_price = get_btc_price()
     usdt_equity = get_margin_balance()
@@ -95,7 +93,6 @@ def execute_order(volatility):
         "side": "open_long",
         "orderType": "market",
         "size": str(order_size),
-        "price": "",
         "timeInForceValue": "normal",
         "presetStopLossPrice": str(stop_loss_price),
         "presetTrailingStopCallbackRate": str(callback_rate)
@@ -138,9 +135,10 @@ def home():
     return "Bitget Webhook Bot is Running!"
 
 
-# --- 起動 ---
+# --- 実行 ---
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
 
 
 
