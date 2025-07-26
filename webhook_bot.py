@@ -5,13 +5,15 @@ import hmac
 import hashlib
 import requests
 import logging
+import json
 
+# 環境変数からAPIキーを取得（Render用）
 API_KEY = os.environ.get("BITGET_API_KEY")
 API_SECRET = os.environ.get("BITGET_API_SECRET")
 API_PASSPHRASE = os.environ.get("BITGET_API_PASSPHRASE")
 BASE_URL = "https://api.bitget.com"
 
-# Logging setup
+# ログ設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
@@ -23,6 +25,7 @@ def make_headers(method, path, query="", body=""):
     prehash = f"{timestamp}{method.upper()}{full_path}{body}"
     logger.info("[make_headers] timestamp: %s", timestamp)
     logger.info("[make_headers] prehash: %s", prehash)
+
     sign = hmac.new(
         API_SECRET.encode("utf-8"),
         prehash.encode("utf-8"),
