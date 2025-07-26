@@ -24,18 +24,23 @@ app = Flask(__name__)
 # --- 署名付きヘッダー作成 ---
 def make_headers(method, path, body=""):
     timestamp = str(int(time.time() * 1000))
-    method = method.upper()
-    prehash = f"{timestamp}{method}{path}{body}"
+    prehash = timestamp + method + path + body
     logger.info(f"[make_headers] timestamp: {timestamp}")
     logger.info(f"[make_headers] prehash: {prehash}")
+
     sign = hmac.new(API_SECRET.encode(), prehash.encode(), hashlib.sha256).hexdigest()
-    return {
+
+    headers = {
         "ACCESS-KEY": API_KEY,
         "ACCESS-SIGN": sign,
         "ACCESS-TIMESTAMP": timestamp,
-        "ACCESS-PASSPHRASE": PASSPHRASE,  # ← base64不要！
+        "ACCESS-PASSPHRASE": PASSPHRASE,
         "Content-Type": "application/json"
     }
+
+    logger.info(f"[make_headers] headers: {headers}")
+    return headers
+
 
 # --- 現在価格取得（GET） ---
 def get_ticker():
@@ -50,23 +55,17 @@ def get_ticker():
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
     url = BASE_URL + path
+    body_dict = {"symbol": SYMBOL}
+    body = json.dumps(body_dict, separators=(',', ':'))  # ←改行やスペースなし
 
-    try:
-        body_dict = {"symbol": SYMBOL}  # 🔴← これが絶対に必要！！
-        body = json.dumps(body_dict, separators=(',', ':'))
-        headers = make_headers("POST", path, body)
+    headers = make_headers("POST", path, body)
 
-        logger.info(f"[get_margin_balance] body: {body}")
-        logger.info(f"[get_margin_balance] headers: {headers}")
+    logger.info(f"[get_margin_balance] body: {body}")
+    logger.info(f"[get_margin_balance] headers: {headers}")
 
-        response = requests.post(url, headers=headers, data=body)
-        logger.info(f"[get_margin_balance] Response: {response.json()}")
-        return response.json()
-
-    except Exception as e:
-        logger.error(f"[get_margin_balance] Exception in signing: {e}")
-        return {"code": "99999", "msg": f"local error: {str(e)}"}
-
+    response = requests.post(url, headers=headers, data=body)
+    logger.info(f"[get_margin_balance] Response: {response.json()}")
+    return response.json()
 
 
 # --- Webhook受信エンドポイント ---
