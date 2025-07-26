@@ -5,27 +5,24 @@ import hmac
 import hashlib
 import requests
 import logging
-from dotenv import load_dotenv
 
-# 環境変数の読み込み（Render でも動作）
-load_dotenv()
-
-API_KEY = os.getenv("BITGET_API_KEY")
-API_SECRET = os.getenv("BITGET_API_SECRET")
-API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
+API_KEY = os.getenv("API_KEY")
+API_SECRET = os.getenv("API_SECRET")
+API_PASSPHRASE = os.getenv("API_PASSPHRASE")
 BASE_URL = "https://api.bitget.com"
 
-# ログ設定
+# Logging setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
-# Flaskアプリ
 app = Flask(__name__)
 
-# 署名付きヘッダー作成
 def make_headers(method, path, query="", body=""):
     timestamp = str(int(time.time() * 1000))
-    prehash = f"{timestamp}{method.upper()}{path}{query}{body}"
+    full_path = f"{path}{query}"
+    prehash = f"{timestamp}{method.upper()}{full_path}{body}"
+    if not API_SECRET:
+        raise ValueError("API_SECRET is not set")
     sign = hmac.new(
         API_SECRET.encode("utf-8"),
         prehash.encode("utf-8"),
@@ -42,7 +39,6 @@ def make_headers(method, path, query="", body=""):
         headers["Content-Type"] = "application/json"
     return headers
 
-# 現在の価格取得（署名付き）
 def get_ticker():
     path = "/api/mix/v1/market/ticker"
     query = "?symbol=BTCUSDT_UMCBL"
@@ -52,17 +48,15 @@ def get_ticker():
     logger.info("[get_ticker] Response: %s", response.json())
     return response.json()
 
-# 証拠金残高の取得（修正済み）
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
-    query = ""  # ← symbolを付けないことで署名ミスマッチを防ぐ
-    url = f"{BASE_URL}{path}"
+    query = "?symbol=BTCUSDT_UMCBL"
+    url = f"{BASE_URL}{path}{query}"
     headers = make_headers("GET", path, query=query)
     response = requests.get(url, headers=headers)
     logger.info("[get_margin_balance] Response: %s", response.json())
     return response.json()
 
-# Webhook受信エンドポイント
 @app.route("/webhook", methods=["POST"])
 def webhook():
     raw_data = request.data.decode("utf-8")
@@ -78,18 +72,13 @@ def webhook():
 
             ticker = get_ticker()
             if ticker["code"] != "00000":
-                raise Exception("Ticker fetch failed")
+                raise Exception("Failed to fetch ticker")
 
             account = get_margin_balance()
             if account["code"] != "00000":
-                raise Exception(f"Margin API error: {account['msg']}")
+                raise Exception("Margin API error: %s" % account["msg"])
 
-            return jsonify({
-                "status": "success",
-                "volatility": volatility,
-                "price": ticker["data"]["last"],
-                "margin_balance": account["data"]
-            })
+            return jsonify({"status": "success", "volatility": volatility})
 
         except Exception as e:
             logger.error("[webhook] Error: %s", str(e))
@@ -97,12 +86,10 @@ def webhook():
 
     return jsonify({"status": "ignored"})
 
-# テストエンドポイント
 @app.route("/test", methods=["GET"])
 def test():
     return jsonify(get_ticker())
 
-# 起動
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
 
