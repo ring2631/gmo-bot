@@ -3,27 +3,25 @@ import os
 import time
 import hmac
 import hashlib
-import json
 import requests
 import logging
+import json
 
-# 環境変数（Render環境に設定されている前提）
-API_KEY = os.environ.get("BITGET_API_KEY")
-API_SECRET = os.environ.get("BITGET_API_SECRET")
-API_PASSPHRASE = os.environ.get("BITGET_API_PASSPHRASE")
+# 環境変数からAPIキー類を取得（Render環境）
+API_KEY = os.getenv("BITGET_API_KEY")
+API_SECRET = os.getenv("BITGET_API_SECRET")
+API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
 BASE_URL = "https://api.bitget.com"
 
-# ログ設定
+# Logging setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
 app = Flask(__name__)
 
-# --- ヘッダー作成関数 ---
-def make_headers(method, path, query="", body=""):
+def make_headers(method, path, body=""):
     timestamp = str(int(time.time() * 1000))
-    full_path = f"{path}{query}"
-    prehash = f"{timestamp}{method.upper()}{full_path}{body}"
+    prehash = f"{timestamp}{method.upper()}{path}{body}"
     logger.info("[make_headers] timestamp: %s", timestamp)
     logger.info("[make_headers] prehash: %s", prehash)
 
@@ -38,33 +36,29 @@ def make_headers(method, path, query="", body=""):
         "ACCESS-SIGN": sign,
         "ACCESS-TIMESTAMP": timestamp,
         "ACCESS-PASSPHRASE": API_PASSPHRASE,
+        "Content-Type": "application/json"
     }
-    if method.upper() != "GET":
-        headers["Content-Type"] = "application/json"
     return headers
 
-# --- ティッカー取得 ---
 def get_ticker():
     path = "/api/mix/v1/market/ticker"
     query = "?symbol=BTCUSDT_UMCBL"
     url = f"{BASE_URL}{path}{query}"
-    headers = make_headers("GET", path, query=query)
+    headers = make_headers("GET", f"{path}{query}")
     response = requests.get(url, headers=headers)
     logger.info("[get_ticker] Response: %s", response.json())
     return response.json()
 
-# --- 証拠金取得（POST）---
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
-    url = f"{BASE_URL}{path}"
     body_dict = {"symbol": "BTCUSDT_UMCBL"}
-    body_json = json.dumps(body_dict, separators=(',', ':'))  # ← prehash 用
-    headers = make_headers("POST", path, body=body_json)
-    response = requests.post(url, headers=headers, json=body_dict)  # ← POST本体送信
+    body_str = json.dumps(body_dict, separators=(",", ":"))
+    url = f"{BASE_URL}{path}"
+    headers = make_headers("POST", path, body=body_str)
+    response = requests.post(url, headers=headers, data=body_str)
     logger.info("[get_margin_balance] Response: %s", response.json())
     return response.json()
 
-# --- Webhookエンドポイント ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
     raw_data = request.data.decode("utf-8")
@@ -84,7 +78,7 @@ def webhook():
 
             account = get_margin_balance()
             if account["code"] != "00000":
-                raise Exception("Margin API error: %s" % account["msg"])
+                raise Exception(f"Margin API error: {account['msg']}")
 
             return jsonify({"status": "success", "volatility": volatility})
 
@@ -94,12 +88,10 @@ def webhook():
 
     return jsonify({"status": "ignored"})
 
-# --- テスト用 ---
 @app.route("/test", methods=["GET"])
 def test():
     return jsonify(get_ticker())
 
-# --- Flask起動 ---
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
 
