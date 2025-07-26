@@ -28,17 +28,14 @@ def make_headers(method, path, body=""):
     prehash = timestamp + method + path + body
     logger.info(f"[make_headers] timestamp: {timestamp}")
     logger.info(f"[make_headers] prehash: {prehash}")
-    
-    # Bitget仕様に合わせてBase64エンコード！
     sign = base64.b64encode(
         hmac.new(API_SECRET.encode(), prehash.encode(), hashlib.sha256).digest()
     ).decode()
-
     return {
         "ACCESS-KEY": API_KEY,
         "ACCESS-SIGN": sign,
         "ACCESS-TIMESTAMP": timestamp,
-        "ACCESS-PASSPHRASE": PASSPHRASE,
+        "ACCESS-PASSPHRASE": PASSPHRASE,  # 使ってなければ除外OK
         "Content-Type": "application/json"
     }
 
