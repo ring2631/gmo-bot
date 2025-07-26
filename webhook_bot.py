@@ -7,11 +7,7 @@ import hashlib
 import requests
 import logging
 import re
-from flask import Flask, request, jsonify
-from dotenv import load_dotenv
-
-# 環境変数読み込み（.envファイルや環境に設定してください）
-load_dotenv()
+from flask import Flask, request, 
 
 API_KEY = os.getenv("BITGET_API_KEY")
 API_SECRET = os.getenv("BITGET_API_SECRET")
