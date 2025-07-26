@@ -9,7 +9,7 @@ import json
 from urllib.parse import urlencode
 from flask import Flask, request, jsonify
 
-# --- 環境変数（Renderで設定） ---
+# --- 環境変数（Renderに設定） ---
 API_KEY = os.environ["BITGET_API_KEY"]
 API_SECRET = os.environ["BITGET_API_SECRET"]
 API_PASSPHRASE = os.environ["BITGET_API_PASSPHRASE"]
@@ -52,25 +52,26 @@ def make_headers(method, path, query="", body=""):
 def get_btc_price():
     url = "https://api.bitget.com/api/mix/v1/market/ticker"
     params = {"symbol": SYMBOL}
-    query = urlencode(params)
+    query = f"symbol={SYMBOL}"
     headers = make_headers("GET", "/api/mix/v1/market/ticker", query=query)
     res = requests.get(url, headers=headers, params=params).json()
     logger.info(f"[get_btc_price] Ticker: {res}")
     return float(res["data"]["last"])
 
-# --- 証拠金取得（署名エラー対策済） ---
+# --- 証拠金取得（署名エラー完全対応） ---
 def get_margin_balance():
-    url = "https://api.bitget.com/api/mix/v1/account/account"
+    path = "/api/mix/v1/account/account"
+    url = f"https://api.bitget.com{path}"
+    query_str = f"symbol={SYMBOL}&marginCoin={MARGIN_COIN}"
+    headers = make_headers("GET", path, query=query_str)
     params = {"symbol": SYMBOL, "marginCoin": MARGIN_COIN}
-    query = urlencode(params)
-    headers = make_headers("GET", "/api/mix/v1/account/account", query=query)
     res = requests.get(url, headers=headers, params=params).json()
     logger.info(f"[get_margin_balance] Account: {res}")
     if res["code"] != "00000":
         raise Exception(f"Margin API error: {res['msg']}")
     return float(res["data"]["usdtEquity"])
 
-# --- 注文実行（トレイリングストップ付き） ---
+# --- トレイリングストップ付き注文実行 ---
 def execute_order(volatility):
     btc_price = get_btc_price()
     usdt_equity = get_margin_balance()
@@ -133,7 +134,7 @@ def webhook():
 def home():
     return "Bitget Webhook Bot is Running!"
 
-# --- ローカル起動用 ---
+# --- アプリ起動 ---
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
 
