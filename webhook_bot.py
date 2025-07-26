@@ -25,7 +25,7 @@ SYMBOL = "BTCUSDT_UMCBL"
 # 署名付きヘッダー生成関数
 def make_headers(method, path, body=""):
     timestamp = str(int(time.time() * 1000))
-    prehash = timestamp + method.upper() + path + body  # ←ここだけ upper()
+    prehash = timestamp + method.upper() + path + body
     logger.info(f"[make_headers] prehash: {prehash}")
 
     sign = base64.b64encode(
@@ -37,7 +37,7 @@ def make_headers(method, path, body=""):
         "ACCESS-SIGN": sign,
         "ACCESS-TIMESTAMP": timestamp,
         "ACCESS-PASSPHRASE": PASSPHRASE,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json; charset=utf-8"  # ← 変更点
     }
 
 
