@@ -27,7 +27,12 @@ def make_headers(method, path, body=""):
     prehash = timestamp + method + path + body
     logger.info(f"[make_headers] timestamp: {timestamp}")
     logger.info(f"[make_headers] prehash: {prehash}")
-    sign = hmac.new(API_SECRET.encode(), prehash.encode(), hashlib.sha256).hexdigest()
+    
+    # Bitget仕様に合わせてBase64エンコード！
+    sign = base64.b64encode(
+        hmac.new(API_SECRET.encode(), prehash.encode(), hashlib.sha256).digest()
+    ).decode()
+
     return {
         "ACCESS-KEY": API_KEY,
         "ACCESS-SIGN": sign,
@@ -35,6 +40,7 @@ def make_headers(method, path, body=""):
         "ACCESS-PASSPHRASE": PASSPHRASE,
         "Content-Type": "application/json"
     }
+
 
 # BTC価格取得（GET）
 def get_ticker():
