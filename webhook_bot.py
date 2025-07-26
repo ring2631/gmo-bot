@@ -50,9 +50,9 @@ def get_margin_balance():
     path = "/api/mix/v1/account/account"
     url = BASE_URL + path
     body_dict = {"symbol": SYMBOL}
-    body = json.dumps(body_dict, separators=(',', ':'))  # ← 修正ポイント
+    body = json.dumps(body_dict, separators=(',', ':'))  # ← 署名と一致
     headers = make_headers("POST", path, body)
-    response = requests.post(url, headers=headers, data=body)
+    response = requests.post(url, headers=headers, data=body)  # ← 本体にも完全一致文字列
     logger.info(f"[get_margin_balance] Response: {response.json()}")
     return response.json()
 
