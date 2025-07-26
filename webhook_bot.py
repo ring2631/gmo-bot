@@ -22,24 +22,26 @@ logger = logging.getLogger("webhook_bot")
 app = Flask(__name__)
 
 # --- 署名付きヘッダー作成 ---
-def make_headers(method, path, body=""):
+def make_headers(method, path, body_dict=None):
     timestamp = str(int(time.time() * 1000))
-    prehash = timestamp + method + path + body
-    logger.info(f"[make_headers] timestamp: {timestamp}")
-    logger.info(f"[make_headers] prehash: {prehash}")
+    method = method.upper()  # ←ここ追加
 
-    sign = hmac.new(API_SECRET.encode(), prehash.encode(), hashlib.sha256).hexdigest()
+    body = json.dumps(body_dict) if body_dict else ""
+
+    prehash = timestamp + method + path + body
+    signature = hmac.new(API_SECRET.encode(), prehash.encode(), hashlib.sha256).hexdigest()
 
     headers = {
         "ACCESS-KEY": API_KEY,
-        "ACCESS-SIGN": sign,
+        "ACCESS-SIGN": signature,
         "ACCESS-TIMESTAMP": timestamp,
         "ACCESS-PASSPHRASE": PASSPHRASE,
         "Content-Type": "application/json"
     }
 
+    logger.info(f"[make_headers] prehash: {prehash}")
     logger.info(f"[make_headers] headers: {headers}")
-    return headers
+    return headers, body
 
 
 # --- 現在価格取得（GET） ---
