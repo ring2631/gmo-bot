@@ -60,7 +60,7 @@ def get_margin_balance():
     body_dict = {"symbol": SYMBOL}
     body = json.dumps(body_dict, separators=(',', ':'))  # ← スペースなしで
 
-    headers = make_headers("POST", path, body)
+    headers, body = make_headers("POST", path, body_dict)  # ✅ 正しく unpack
     
     logger.info(f"[get_margin_balance] body: {body}")
     logger.info(f"[get_margin_balance] headers: {headers}")
