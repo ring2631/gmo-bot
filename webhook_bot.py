@@ -14,26 +14,27 @@ API_KEY = os.environ["BITGET_API_KEY"]
 API_SECRET = os.environ["BITGET_API_SECRET"]
 API_PASSPHRASE = os.environ["BITGET_API_PASSPHRASE"]
 
-# --- 設定 ---
+# --- 設定値 ---
 SYMBOL = "BTCUSDT_UMCBL"
 MARGIN_COIN = "USDT"
 RISK_RATIO = 0.35
 LEVERAGE = 2
 
-# --- Flaskとログ ---
+# --- Flask & ロガー設定 ---
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
-# --- HMAC署名付きヘッダー生成 ---
+# --- Bitget署名付きヘッダー作成 ---
 def make_headers(method, path, query="", body=""):
     timestamp = str(int(time.time() * 1000))
-    full_path = path + ("?" + query if method == "GET" and query else "")
-    
-    # ✅ GET / DELETE の場合は body を空にする（Bitget仕様）
-    if method.upper() in ["GET", "DELETE"]:
+
+    # GET/DELETE はクエリ付きパスにして body を空に
+    if method.upper() in ["GET", "DELETE"] and query:
+        full_path = f"{path}?{query}"
         final_body = ""
     else:
+        full_path = path
         final_body = body if body else ""
 
     prehash = timestamp + method + full_path + final_body
@@ -47,27 +48,29 @@ def make_headers(method, path, query="", body=""):
         "Content-Type": "application/json"
     }
 
-# --- BTC価格取得 ---
+# --- 現在価格取得 ---
 def get_btc_price():
     url = "https://api.bitget.com/api/mix/v1/market/ticker"
     params = {"symbol": SYMBOL}
-    headers = make_headers("GET", "/api/mix/v1/market/ticker", urlencode(params))
+    query = urlencode(params)
+    headers = make_headers("GET", "/api/mix/v1/market/ticker", query=query)
     res = requests.get(url, headers=headers, params=params).json()
     logger.info(f"[get_btc_price] Ticker: {res}")
     return float(res["data"]["last"])
 
-# --- 証拠金残高取得 ---
+# --- 証拠金取得（署名エラー対策済） ---
 def get_margin_balance():
     url = "https://api.bitget.com/api/mix/v1/account/account"
     params = {"symbol": SYMBOL, "marginCoin": MARGIN_COIN}
-    headers = make_headers("GET", "/api/mix/v1/account/account", urlencode(params))
+    query = urlencode(params)
+    headers = make_headers("GET", "/api/mix/v1/account/account", query=query)
     res = requests.get(url, headers=headers, params=params).json()
     logger.info(f"[get_margin_balance] Account: {res}")
     if res["code"] != "00000":
         raise Exception(f"Margin API error: {res['msg']}")
     return float(res["data"]["usdtEquity"])
 
-# --- 注文発行処理 ---
+# --- 注文実行（トレイリングストップ付き） ---
 def execute_order(volatility):
     btc_price = get_btc_price()
     usdt_equity = get_margin_balance()
@@ -103,7 +106,7 @@ def execute_order(volatility):
     logger.info(f"[execute_order] Order response: {response.text}")
     return response.json()
 
-# --- Webhookエンドポイント（TradingViewから叩く）---
+# --- Webhook受信エンドポイント ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
@@ -130,9 +133,10 @@ def webhook():
 def home():
     return "Bitget Webhook Bot is Running!"
 
-# --- アプリ起動 ---
+# --- ローカル起動用 ---
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
 
 
 
