@@ -1,14 +1,18 @@
-import time, hmac, hashlib, requests, json
-from urllib.parse import urlencode
+import time
+import hmac
+import hashlib
+import requests
+import json
 import os
-from dotenv import load_dotenv
+from urllib.parse import urlencode
 
-# .env読み込み
-load_dotenv()
-API_KEY = os.getenv("BITGET_API_KEY")
-API_SECRET = os.getenv("BITGET_API_SECRET")
-API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
+# --- Renderでは .env は使わないので load_dotenv は不要 ---
+# APIキー・シークレット・パスフレーズを環境変数から取得
+API_KEY = os.environ["BITGET_API_KEY"]
+API_SECRET = os.environ["BITGET_API_SECRET"]
+API_PASSPHRASE = os.environ["BITGET_API_PASSPHRASE"]
 
+# --- ヘッダー生成関数 ---
 def make_headers(api_key, api_secret, api_passphrase, method, path, query_string="", body=""):
     timestamp = str(int(time.time() * 1000))
     full_path = path
@@ -24,6 +28,7 @@ def make_headers(api_key, api_secret, api_passphrase, method, path, query_string
         "Content-Type": "application/json"
     }
 
+# --- Bitget署名テストを実行 ---
 def test_signature():
     base_url = "https://api.bitget.com"
     path = "/api/mix/v1/account/account"
@@ -35,11 +40,13 @@ def test_signature():
     query_string = urlencode(query_params)
 
     headers = make_headers(API_KEY, API_SECRET, API_PASSPHRASE, method, path, query_string)
-    response = requests.get(f"{base_url}{path}?{query_string}", headers=headers)
+    url = f"{base_url}{path}?{query_string}"
+    response = requests.get(url, headers=headers)
 
     print("=== Bitget Signature Test ===")
     print(json.dumps(response.json(), indent=2))
 
+# --- 実行 ---
 if __name__ == "__main__":
     test_signature()
 
