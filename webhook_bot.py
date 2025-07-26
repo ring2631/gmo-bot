@@ -50,17 +50,23 @@ def get_ticker():
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
     url = BASE_URL + path
-    body_dict = {"symbol": SYMBOL}
-    body = json.dumps(body_dict, separators=(',', ':'))  # ← スペース無し！
-    headers = make_headers("POST", path, body)
-    response = requests.post(url, headers=headers, data=body)
-    logger.info(f"[get_margin_balance] Response: {response.json()}")
-    return response.json()
-try:
-    body = json.dumps(body_dict, separators=(',', ':'))
-    headers = make_headers("POST", path, body)
-except Exception as e:
-    logger.error(f"[get_margin_balance] Exception in signing: {e}")
+
+    try:
+        body_dict = {"symbol": SYMBOL}  # 🔴← これが絶対に必要！！
+        body = json.dumps(body_dict, separators=(',', ':'))
+        headers = make_headers("POST", path, body)
+
+        logger.info(f"[get_margin_balance] body: {body}")
+        logger.info(f"[get_margin_balance] headers: {headers}")
+
+        response = requests.post(url, headers=headers, data=body)
+        logger.info(f"[get_margin_balance] Response: {response.json()}")
+        return response.json()
+
+    except Exception as e:
+        logger.error(f"[get_margin_balance] Exception in signing: {e}")
+        return {"code": "99999", "msg": f"local error: {str(e)}"}
+
 
 
 # --- Webhook受信エンドポイント ---
