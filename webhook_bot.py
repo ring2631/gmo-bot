@@ -11,7 +11,7 @@ from flask import Flask, request, jsonify
 # 環境変数（Render 側で設定済み想定）
 API_KEY = os.getenv("BITGET_API_KEY")
 API_SECRET = os.getenv("BITGET_API_SECRET")
-PASSPHRASE = os.getenv("BITGET_PASSPHRASE")
+PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
 BASE_URL = "https://api.bitget.com"
 SYMBOL = "BTCUSDT_UMCBL"
 
