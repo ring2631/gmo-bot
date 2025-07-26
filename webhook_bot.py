@@ -9,29 +9,36 @@ import json
 from urllib.parse import urlencode
 from flask import Flask, request, jsonify
 
-# --- 環境変数（Renderの Environment に設定）---
+# --- 環境変数（Renderで設定） ---
 API_KEY = os.environ["BITGET_API_KEY"]
 API_SECRET = os.environ["BITGET_API_SECRET"]
 API_PASSPHRASE = os.environ["BITGET_API_PASSPHRASE"]
 
-# --- 設定値 ---
+# --- 設定 ---
 SYMBOL = "BTCUSDT_UMCBL"
 MARGIN_COIN = "USDT"
 RISK_RATIO = 0.35
 LEVERAGE = 2
 
-# --- Flask & ロガー ---
+# --- Flaskとログ ---
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
-# --- 署名付きヘッダー作成 ---
+# --- HMAC署名付きヘッダー生成 ---
 def make_headers(method, path, query="", body=""):
     timestamp = str(int(time.time() * 1000))
     full_path = path + ("?" + query if method == "GET" and query else "")
-    final_body = body if method == "POST" else ""  # ← 重要！
+    
+    # ✅ GET / DELETE の場合は body を空にする（Bitget仕様）
+    if method.upper() in ["GET", "DELETE"]:
+        final_body = ""
+    else:
+        final_body = body if body else ""
+
     prehash = timestamp + method + full_path + final_body
     sign = hmac.new(API_SECRET.encode(), prehash.encode(), hashlib.sha256).hexdigest()
+
     return {
         "ACCESS-KEY": API_KEY,
         "ACCESS-SIGN": sign,
@@ -40,7 +47,7 @@ def make_headers(method, path, query="", body=""):
         "Content-Type": "application/json"
     }
 
-# --- 現在のBTC価格取得 ---
+# --- BTC価格取得 ---
 def get_btc_price():
     url = "https://api.bitget.com/api/mix/v1/market/ticker"
     params = {"symbol": SYMBOL}
@@ -60,7 +67,7 @@ def get_margin_balance():
         raise Exception(f"Margin API error: {res['msg']}")
     return float(res["data"]["usdtEquity"])
 
-# --- 注文実行 ---
+# --- 注文発行処理 ---
 def execute_order(volatility):
     btc_price = get_btc_price()
     usdt_equity = get_margin_balance()
@@ -96,7 +103,7 @@ def execute_order(volatility):
     logger.info(f"[execute_order] Order response: {response.text}")
     return response.json()
 
-# --- Webhookエンドポイント ---
+# --- Webhookエンドポイント（TradingViewから叩く）---
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
@@ -118,11 +125,12 @@ def webhook():
         logger.error(f"[webhook] Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# --- 通常アクセス確認用 ---
+# --- 動作確認用ルート ---
 @app.route("/")
 def home():
     return "Bitget Webhook Bot is Running!"
 
+# --- アプリ起動 ---
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
 
