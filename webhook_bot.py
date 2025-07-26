@@ -5,15 +5,10 @@ import hmac
 import hashlib
 import requests
 import logging
-import json
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
-
-API_KEY = os.getenv("BITGET_API_KEY")
-API_SECRET = os.getenv("BITGET_API_SECRET")
-API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
+API_KEY = os.environ.get("BITGET_API_KEY")
+API_SECRET = os.environ.get("BITGET_API_SECRET")
+API_PASSPHRASE = os.environ.get("BITGET_API_PASSPHRASE")
 BASE_URL = "https://api.bitget.com"
 
 # Logging setup
@@ -26,14 +21,13 @@ def make_headers(method, path, query="", body=""):
     timestamp = str(int(time.time() * 1000))
     full_path = f"{path}{query}"
     prehash = f"{timestamp}{method.upper()}{full_path}{body}"
+    logger.info("[make_headers] timestamp: %s", timestamp)
+    logger.info("[make_headers] prehash: %s", prehash)
     sign = hmac.new(
         API_SECRET.encode("utf-8"),
         prehash.encode("utf-8"),
         hashlib.sha256
     ).hexdigest()
-
-    logger.info("[make_headers] timestamp: %s", timestamp)
-    logger.info("[make_headers] prehash: %s", prehash)
 
     headers = {
         "ACCESS-KEY": API_KEY,
@@ -56,11 +50,11 @@ def get_ticker():
 
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
-    body_dict = {"symbol": "BTCUSDT_UMCBL"}
-    body = json.dumps(body_dict, separators=(',', ':'), sort_keys=True)
+    body = {"symbol": "BTCUSDT_UMCBL"}
+    json_body = json.dumps(body)
+    headers = make_headers("POST", path, body=json_body)
     url = f"{BASE_URL}{path}"
-    headers = make_headers("POST", path, body=body)
-    response = requests.post(url, headers=headers, data=body)
+    response = requests.post(url, headers=headers, data=json_body)
     logger.info("[get_margin_balance] Response: %s", response.json())
     return response.json()
 
