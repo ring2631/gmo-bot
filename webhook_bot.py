@@ -28,6 +28,9 @@ def make_headers(method, path, body=""):
     prehash = f"{timestamp}{method}{path}{body}"
     logger.info(f"[make_headers] timestamp: {timestamp}")
     logger.info(f"[make_headers] prehash: {prehash}")
+    logger.info(f"[debug] API_KEY: {API_KEY}")
+    logger.info(f"[debug] API_SECRET: {API_SECRET}")
+    logger.info(f"[debug] PASSPHRASE: {PASSPHRASE}")
     sign = hmac.new(API_SECRET.encode(), prehash.encode(), hashlib.sha256).hexdigest()
     return {
         "ACCESS-KEY": API_KEY,
