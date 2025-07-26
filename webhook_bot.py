@@ -50,11 +50,19 @@ def get_margin_balance():
     path = "/api/mix/v1/account/account"
     url = BASE_URL + path
     body_dict = {"symbol": SYMBOL}
-    body = json.dumps(body_dict, separators=(',', ':'))  # ← 署名と一致
+
+    # 🔑 ボディを厳密に整形（separators重要）
+    body = json.dumps(body_dict, separators=(',', ':'))
+
+    # ✅ 署名はこのbody文字列で計算
     headers = make_headers("POST", path, body)
-    response = requests.post(url, headers=headers, data=body)  # ← 本体にも完全一致文字列
+
+    # ✅ Content-Type: application/json を保ったまま、文字列として送る
+    response = requests.post(url, headers=headers, data=body)
+
     logger.info(f"[get_margin_balance] Response: {response.json()}")
     return response.json()
+
 
 # Webhook受信
 @app.route("/webhook", methods=["POST"])
