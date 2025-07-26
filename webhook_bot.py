@@ -5,21 +5,17 @@ import hmac
 import hashlib
 import requests
 import logging
-from dotenv import load_dotenv
-
-# Load environment variables from .env or Render environment
-load_dotenv()
-
-API_KEY = os.environ.get("API_KEY")
-API_SECRET = os.environ.get("API_SECRET")
-API_PASSPHRASE = os.environ.get("API_PASSPHRASE")
-BASE_URL = "https://api.bitget.com"
-
-# Logging setup
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("webhook_bot")
 
 app = Flask(__name__)
+
+# 環境変数から読み込み（Render用、.env不要）
+API_KEY = os.getenv("API_KEY")
+API_SECRET = os.getenv("API_SECRET")
+API_PASSPHRASE = os.getenv("API_PASSPHRASE")
+BASE_URL = "https://api.bitget.com"
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("sig_test")
 
 def make_headers(method, path, query="", body=""):
     timestamp = str(int(time.time() * 1000))
@@ -41,59 +37,31 @@ def make_headers(method, path, query="", body=""):
         headers["Content-Type"] = "application/json"
     return headers
 
-def get_ticker():
-    path = "/api/mix/v1/market/ticker"
-    query = "?symbol=BTCUSDT_UMCBL"
-    url = f"{BASE_URL}{path}{query}"
-    headers = make_headers("GET", path, query=query)
-    response = requests.get(url, headers=headers)
-    logger.info("[get_ticker] Response: %s", response.json())
-    return response.json()
-
-def get_margin_balance():
+def verify_signature():
     path = "/api/mix/v1/account/account"
     query = "?symbol=BTCUSDT_UMCBL"
-    url = f"{BASE_URL}{path}{query}"
+    url = BASE_URL + path + query
     headers = make_headers("GET", path, query=query)
     response = requests.get(url, headers=headers)
-    logger.info("[get_margin_balance] Response: %s", response.json())
+    logger.info("[verify_signature] Response: %s", response.json())
     return response.json()
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    raw_data = request.data.decode("utf-8")
-    logger.info("[webhook] Raw: %s", raw_data)
+    raw = request.data.decode("utf-8")
+    logger.info("[webhook] Raw: %s", raw)
 
-    if raw_data.startswith("BUY"):
-        logger.info("[webhook] BUY signal detected")
-
-        try:
-            vol_part = raw_data.split("VOL=")[1]
-            volatility = float(vol_part.strip())
-            logger.info("[webhook] Extracted volatility: %s", volatility)
-
-            ticker = get_ticker()
-            if ticker["code"] != "00000":
-                raise Exception("Failed to fetch ticker")
-
-            account = get_margin_balance()
-            if account["code"] != "00000":
-                raise Exception("Margin API error: %s" % account["msg"])
-
-            return jsonify({"status": "success", "volatility": volatility})
-
-        except Exception as e:
-            logger.error("[webhook] Error: %s", str(e))
-            return jsonify({"status": "error", "message": str(e)}), 500
+    if raw.startswith("BUY VOL="):
+        result = verify_signature()
+        if result["code"] == "00000":
+            return jsonify({"status": "OK"})
+        else:
+            return jsonify({"status": "署名エラー", "message": result.get("msg", "")}), 500
 
     return jsonify({"status": "ignored"})
 
-@app.route("/test", methods=["GET"])
-def test():
-    return jsonify(get_ticker())
-
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(port=5000)
 
 
 
