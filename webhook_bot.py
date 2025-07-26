@@ -6,29 +6,24 @@ import hashlib
 import requests
 import logging
 
-# 環境変数取得（Render環境でセット済みであること）
-API_KEY = os.getenv("API_KEY")
-API_SECRET = os.getenv("API_SECRET")
-API_PASSPHRASE = os.getenv("API_PASSPHRASE")
+# 環境変数をRenderから直接取得
+API_KEY = os.getenv("BITGET_API_KEY")
+API_SECRET = os.getenv("BITGET_API_SECRET")
+API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
 BASE_URL = "https://api.bitget.com"
 
 # ログ設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
-# Flask アプリ初期化
 app = Flask(__name__)
 
-# ---- ヘッダー作成（署名） ----
 def make_headers(method, path, query="", body=""):
+    if not API_SECRET:
+        raise ValueError("API_SECRET is not set")
     timestamp = str(int(time.time() * 1000))
     full_path = f"{path}{query}"
     prehash = f"{timestamp}{method.upper()}{full_path}{body}"
-
-    # NoneTypeエラー対策（明示チェック）
-    if not API_SECRET:
-        raise ValueError("API_SECRET is not set")
-
     sign = hmac.new(
         API_SECRET.encode("utf-8"),
         prehash.encode("utf-8"),
@@ -45,7 +40,6 @@ def make_headers(method, path, query="", body=""):
         headers["Content-Type"] = "application/json"
     return headers
 
-# ---- 現在価格取得 ----
 def get_ticker():
     path = "/api/mix/v1/market/ticker"
     query = "?symbol=BTCUSDT_UMCBL"
@@ -55,7 +49,6 @@ def get_ticker():
     logger.info("[get_ticker] Response: %s", response.json())
     return response.json()
 
-# ---- 証拠金情報取得（Margin）----
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
     query = "?symbol=BTCUSDT_UMCBL"
@@ -65,7 +58,6 @@ def get_margin_balance():
     logger.info("[get_margin_balance] Response: %s", response.json())
     return response.json()
 
-# ---- Webhook受信 ----
 @app.route("/webhook", methods=["POST"])
 def webhook():
     raw_data = request.data.decode("utf-8")
@@ -95,15 +87,13 @@ def webhook():
 
     return jsonify({"status": "ignored"})
 
-# ---- テスト用エンドポイント ----
 @app.route("/test", methods=["GET"])
 def test():
     return jsonify(get_ticker())
 
-# ---- 起動 ----
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # Render用ポート
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=5000)
+
 
 
 
