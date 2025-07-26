@@ -33,7 +33,7 @@ def make_headers(method, path, body=""):
         "ACCESS-KEY": API_KEY,
         "ACCESS-SIGN": sign,
         "ACCESS-TIMESTAMP": timestamp,
-        "ACCESS-PASSPHRASE": base64.b64encode(PASSPHRASE.encode()).decode(),
+        "ACCESS-PASSPHRASE": PASSPHRASE,  # ← base64不要！
         "Content-Type": "application/json"
     }
 
