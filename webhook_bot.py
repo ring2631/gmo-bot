@@ -6,19 +6,21 @@ import hashlib
 import requests
 import logging
 
-# 環境変数の読み込み（Render環境を想定、dotenvは使わない）
-API_KEY = os.getenv("API_KEY")
-API_SECRET = os.getenv("API_SECRET")
-API_PASSPHRASE = os.getenv("API_PASSPHRASE")
+# Read environment variables
+API_KEY = os.getenv("BITGET_API_KEY")
+API_SECRET = os.getenv("BITGET_API_SECRET")
+API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
 BASE_URL = "https://api.bitget.com"
 
-# ログ設定
+# Logging setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
 app = Flask(__name__)
 
 def make_headers(method, path, query="", body=""):
+    if not API_SECRET:
+        raise ValueError("API_SECRET is not set")
     timestamp = str(int(time.time() * 1000))
     full_path = f"{path}{query}"
     prehash = f"{timestamp}{method.upper()}{full_path}{body}"
@@ -49,9 +51,9 @@ def get_ticker():
 
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
-    # query を削除（←これが署名エラーの原因の可能性大）
-    url = f"{BASE_URL}{path}"
-    headers = make_headers("GET", path)  # query も body も不要
+    query = "?symbol=BTCUSDT_UMCBL"
+    url = f"{BASE_URL}{path}{query}"
+    headers = make_headers("GET", path, query=query)
     response = requests.get(url, headers=headers)
     logger.info("[get_margin_balance] Response: %s", response.json())
     return response.json()
