@@ -73,6 +73,7 @@ def execute_order(volatility):
             price="",  # 成行
             timeInForceValue="normal",
             presetStopLossPrice=str(stop_loss_price),
+            presetTakeProfitPrice=str(take_profit_price)
         )
         logger.info(f"[execute_order] Order placed: {order}")
         return order
