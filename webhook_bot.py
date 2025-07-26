@@ -1,30 +1,32 @@
-import os
-import time
+from flask import Flask, request, jsonify
+import requests
 import hmac
 import hashlib
-import json
+import time
+import os
 import logging
-import requests
-from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 
-# Flaskと環境変数の初期化
-app = Flask(__name__)
+# ロード環境変数
 load_dotenv()
+
+API_KEY = os.getenv("BITGET_API_KEY")
+API_SECRET = os.getenv("BITGET_API_SECRET")
+API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
+BASE_URL = "https://api.bitget.com"
+SYMBOL = "BTCUSDT_UMCBL"
+MARGIN_COIN = "USDT"
+LEVERAGE = 2
+TRADE_RATIO = 0.35
+
+app = Flask(__name__)
 
 # ログ設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
-# 環境変数の取得
-API_KEY = os.getenv("BITGET_API_KEY")
-API_SECRET = os.getenv("BITGET_API_SECRET")
-API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
-MARGIN_COIN = "USDT"
-SYMBOL = "BTCUSDT_UMCBL"
-BASE_URL = "https://api.bitget.com"
+# ヘッダー生成
 
-# 署名付きヘッダー作成関数
 def make_headers(method, path, body=""):
     timestamp = str(int(time.time() * 1000))
     prehash = f"{timestamp}{method.upper()}{path}{body}"
@@ -42,15 +44,16 @@ def make_headers(method, path, body=""):
         "Content-Type": "application/json"
     }
 
-# 現在のBTC価格を取得
+# 現在価格取得
+
 def get_btc_price():
-    path = f"/api/mix/v1/market/ticker"
-    url = f"{BASE_URL}{path}?symbol={SYMBOL}"
+    url = f"{BASE_URL}/api/mix/v1/market/ticker?symbol={SYMBOL}"
     res = requests.get(url).json()
     logger.info(f"[get_btc_price] Ticker: {res}")
     return float(res["data"]["last"])
 
-# 証拠金残高を取得
+# 証拠金残高取得
+
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
     query = f"marginCoin={MARGIN_COIN}"
@@ -62,43 +65,70 @@ def get_margin_balance():
         raise Exception(f"Margin API error: {res['msg']}")
     return float(res["data"]["usdtEquity"])
 
-# 注文実行（仮：SDKで使ってた元ロジックを流用予定）
-def execute_order(signal, volatility):
-    btc_price = get_btc_price()
-    balance = get_margin_balance()
-    stake_ratio = 0.35
-    leverage = 2
-    order_value = balance * stake_ratio * leverage
-    size = round(order_value / btc_price, 3)
-    logger.info(f"[execute_order] Calculated order size: {size} BTC")
-    # 注文処理は後で追加（ここはSDKベースに合わせてカスタマイズ）
-    return size
+# 注文送信
 
-# Webhook受信エンドポイント
+def place_order(volatility):
+    price = get_btc_price()
+    balance = get_margin_balance()
+    order_value = balance * TRADE_RATIO * LEVERAGE
+    size = round(order_value / price, 4)
+
+    logger.info(f"[execute_order] Calculated order size: {size} BTC")
+
+    path = "/api/mix/v1/order/place-order"
+    url = f"{BASE_URL}{path}"
+
+    body_dict = {
+        "symbol": SYMBOL,
+        "marginCoin": MARGIN_COIN,
+        "size": str(size),
+        "price": str(price),
+        "side": "open_long",
+        "orderType": "market",
+        "timeInForceValue": "normal"
+    }
+
+    body = json.dumps(body_dict)
+    headers = make_headers("POST", path, body)
+
+    res = requests.post(url, headers=headers, data=body).json()
+    logger.info(f"[execute_order] Order response: {res}")
+    if res["code"] != "00000":
+        raise Exception(f"Order failed: {res['msg']}")
+    return res
+
+# Webhookエンドポイント
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        raw_data = request.data.decode("utf-8").strip()
+        raw_data = request.get_data(as_text=True)
         logger.info(f"[webhook] Raw: {raw_data}")
 
         if "BUY" in raw_data:
             logger.info("[webhook] BUY signal detected")
             try:
-                volatility = float(raw_data.split("VOL=")[1])
+                vol_str = raw_data.split("VOL=")[1].strip()
+                volatility = float(vol_str)
                 logger.info(f"[webhook] Extracted volatility: {volatility}")
             except Exception as e:
-                return f"Failed to extract volatility: {e}", 400
+                logger.error(f"[webhook] Volatility parse error: {e}")
+                return jsonify({"error": "Invalid VOL format"}), 400
 
-            execute_order("BUY", volatility)
-            return "Buy order executed", 200
-
-        return "No valid signal detected", 400
-
+            res = place_order(volatility)
+            return jsonify({"status": "ok", "response": res})
+        else:
+            return jsonify({"status": "ignored"})
     except Exception as e:
         logger.error(f"[webhook] Error: {e}")
-        return f"Webhook error: {e}", 500
+        return jsonify({"error": str(e)}), 500
 
-# メイン
+# テスト用エンドポイント
+
+@app.route("/")
+def index():
+    return "Webhook bot is running."
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
 
