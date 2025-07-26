@@ -6,17 +6,16 @@ import hashlib
 import requests
 import logging
 
-# 環境変数の読み込み（Render側で設定）
-BITGET_API_KEY = os.environ.get("BITGET_API_KEY")
-BITGET_API_SECRET = os.environ.get("BITGET_API_SECRET")
-BITGET_API_PASSPHRASE = os.environ.get("BITGET_API_PASSPHRASE")
+# 環境変数から取得（Render の設定に合わせる）
+API_KEY = os.environ.get("BITGET_API_KEY")
+API_SECRET = os.environ.get("BITGET_API_SECRET")
+API_PASSPHRASE = os.environ.get("BITGET_API_PASSPHRASE")
 BASE_URL = "https://api.bitget.com"
 
 # ログ設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
-# Flaskアプリ作成
 app = Flask(__name__)
 
 def make_headers(method, path, query="", body=""):
@@ -25,20 +24,21 @@ def make_headers(method, path, query="", body=""):
     prehash = f"{timestamp}{method.upper()}{full_path}{body}"
     logger.info("[make_headers] timestamp: %s", timestamp)
     logger.info("[make_headers] prehash: %s", prehash)
+
     sign = hmac.new(
-        BITGET_API_SECRET.encode("utf-8"),
+        API_SECRET.encode("utf-8"),
         prehash.encode("utf-8"),
         hashlib.sha256
     ).hexdigest()
 
     headers = {
-        "ACCESS-KEY": BITGET_API_KEY,
+        "ACCESS-KEY": API_KEY,
         "ACCESS-SIGN": sign,
         "ACCESS-TIMESTAMP": timestamp,
-        "ACCESS-PASSPHRASE": BITGET_API_PASSPHRASE,
-        "Content-Type": "application/json"  # ← これが重要！
+        "ACCESS-PASSPHRASE": API_PASSPHRASE,
     }
-
+    if method.upper() != "GET":
+        headers["Content-Type"] = "application/json"
     return headers
 
 def get_ticker():
@@ -52,10 +52,10 @@ def get_ticker():
 
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
-    query = "?symbol=BTCUSDT_UMCBL"
-    url = f"{BASE_URL}{path}{query}"
-    headers = make_headers("GET", path, query=query)
-    response = requests.get(url, headers=headers)
+    body = '{"symbol":"BTCUSDT_UMCBL"}'
+    url = f"{BASE_URL}{path}"
+    headers = make_headers("POST", path, body=body)
+    response = requests.post(url, headers=headers, data=body)
     logger.info("[get_margin_balance] Response: %s", response.json())
     return response.json()
 
