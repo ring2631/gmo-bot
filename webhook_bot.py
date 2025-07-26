@@ -8,7 +8,7 @@ import re
 import json
 from flask import Flask, request, jsonify
 
-# --- 環境変数（Renderに設定） ---
+# --- 環境変数（Render上で設定） ---
 API_KEY = os.environ["BITGET_API_KEY"]
 API_SECRET = os.environ["BITGET_API_SECRET"]
 API_PASSPHRASE = os.environ["BITGET_API_PASSPHRASE"]
@@ -19,18 +19,25 @@ MARGIN_COIN = "USDT"
 RISK_RATIO = 0.35
 LEVERAGE = 2
 
-# --- Flask & Logger 初期化 ---
+# --- Flask初期化 ---
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
-# --- 署名付きヘッダー作成 ---
+
+# --- Bitget署名付きヘッダー生成 ---
 def make_headers(method, path, query="", body=""):
     timestamp = str(int(time.time() * 1000))
+
     full_path = f"{path}?{query}" if method.upper() in ["GET", "DELETE"] and query else path
     final_body = body or ""
-    prehash = timestamp + method.upper() + full_path + final_body
-    sign = hmac.new(API_SECRET.encode(), prehash.encode(), hashlib.sha256).hexdigest()
+
+    prehash = f"{timestamp}{method.upper()}{full_path}{final_body}"
+    sign = hmac.new(
+        bytes(API_SECRET, encoding='utf-8'),
+        bytes(prehash, encoding='utf-8'),
+        hashlib.sha256
+    ).hexdigest()
 
     return {
         "ACCESS-KEY": API_KEY,
@@ -39,6 +46,7 @@ def make_headers(method, path, query="", body=""):
         "ACCESS-PASSPHRASE": API_PASSPHRASE,
         "Content-Type": "application/json"
     }
+
 
 # --- 現在のBTC価格取得 ---
 def get_btc_price():
@@ -50,10 +58,11 @@ def get_btc_price():
     logger.info(f"[get_btc_price] Ticker: {res}")
     return float(res["data"]["last"])
 
-# --- 証拠金取得（symbolを使わない） ---
+
+# --- 証拠金取得（symbolは使わない） ---
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
-    query = f"marginCoin={MARGIN_COIN}"  # ← symbol削除！
+    query = f"marginCoin={MARGIN_COIN}"
     url = f"https://api.bitget.com{path}?{query}"
     headers = make_headers("GET", path, query=query)
     res = requests.get(url, headers=headers).json()
@@ -62,7 +71,8 @@ def get_margin_balance():
         raise Exception(f"Margin API error: {res['msg']}")
     return float(res["data"]["usdtEquity"])
 
-# --- 注文実行（トレイリングストップ付き） ---
+
+# --- トレイリング付き注文実行 ---
 def execute_order(volatility):
     btc_price = get_btc_price()
     usdt_equity = get_margin_balance()
@@ -98,7 +108,8 @@ def execute_order(volatility):
     logger.info(f"[execute_order] Order response: {response.text}")
     return response.json()
 
-# --- Webhook受信処理 ---
+
+# --- Webhookエンドポイント ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
@@ -120,14 +131,17 @@ def webhook():
         logger.error(f"[webhook] Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# --- 起動確認用 ---
+
+# --- ヘルスチェック用 ---
 @app.route("/")
 def home():
     return "Bitget Webhook Bot is Running!"
 
-# --- アプリ起動 ---
+
+# --- 起動 ---
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
 
 
 
