@@ -37,7 +37,7 @@ def make_headers(method, path, body=""):
         "ACCESS-SIGN": sign,
         "ACCESS-TIMESTAMP": timestamp,
         "ACCESS-PASSPHRASE": PASSPHRASE,
-        "Content-Type": "application/json; charset=utf-8"
+        "Content-Type": "application/json"
     }
 
 
