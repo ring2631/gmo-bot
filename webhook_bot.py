@@ -6,7 +6,7 @@ import hashlib
 import requests
 import logging
 
-# 環境変数から読み込み（Render上に設定されている想定）
+# Renderの環境変数をそのまま使用
 API_KEY = os.environ.get("API_KEY")
 API_SECRET = os.environ.get("API_SECRET")
 API_PASSPHRASE = os.environ.get("API_PASSPHRASE")
@@ -16,48 +16,43 @@ BASE_URL = "https://api.bitget.com"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
-# Flask 初期化
 app = Flask(__name__)
 
-# ----- ヘッダー生成 -----
 def make_headers(method, path, query="", body=""):
     if not API_SECRET:
         raise Exception("API_SECRET is not set")
     timestamp = str(int(time.time() * 1000))
-    full_path = f"{path}{query}"
-    prehash = f"{timestamp}{method.upper()}{full_path}{body}"
+    prehash = f"{timestamp}{method.upper()}{path}{query}{body}"
     sign = hmac.new(API_SECRET.encode(), prehash.encode(), hashlib.sha256).hexdigest()
 
     headers = {
         "ACCESS-KEY": API_KEY,
         "ACCESS-SIGN": sign,
         "ACCESS-TIMESTAMP": timestamp,
-        "ACCESS-PASSPHRASE": API_PASSPHRASE,
-        "Content-Type": "application/json"  # ✅ GETでも付ける
+        "ACCESS-PASSPHRASE": API_PASSPHRASE
     }
+    if method.upper() != "GET":
+        headers["Content-Type"] = "application/json"
     return headers
 
-# ----- 現在価格取得 -----
 def get_ticker():
     path = "/api/mix/v1/market/ticker"
     query = "?symbol=BTCUSDT_UMCBL"
     url = f"{BASE_URL}{path}{query}"
-    headers = make_headers("GET", path, query)
+    headers = make_headers("GET", path, query=query)
     response = requests.get(url, headers=headers)
     logger.info("[get_ticker] Response: %s", response.json())
     return response.json()
 
-# ----- 証拠金取得 -----
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
     query = "?symbol=BTCUSDT_UMCBL"
     url = f"{BASE_URL}{path}{query}"
-    headers = make_headers("GET", path, query)
+    headers = make_headers("GET", path, query=query)
     response = requests.get(url, headers=headers)
     logger.info("[get_margin_balance] Response: %s", response.json())
     return response.json()
 
-# ----- Webhook受信 -----
 @app.route("/webhook", methods=["POST"])
 def webhook():
     raw_data = request.data.decode("utf-8")
@@ -87,15 +82,12 @@ def webhook():
 
     return jsonify({"status": "ignored"})
 
-# ----- テストエンドポイント -----
 @app.route("/test", methods=["GET"])
 def test():
     return jsonify(get_ticker())
 
-# ----- サーバー起動 -----
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
-
 
 
 
