@@ -6,10 +6,10 @@ import hashlib
 import requests
 import logging
 
-# Renderの環境変数（BITGET_〜の名前）をそのまま使う
-API_KEY = os.environ.get("BITGET_API_KEY")
-API_SECRET = os.environ.get("BITGET_API_SECRET")
-API_PASSPHRASE = os.environ.get("BITGET_API_PASSPHRASE")
+# 環境変数の読み込み（Render環境を想定、dotenvは使わない）
+API_KEY = os.getenv("API_KEY")
+API_SECRET = os.getenv("API_SECRET")
+API_PASSPHRASE = os.getenv("API_PASSPHRASE")
 BASE_URL = "https://api.bitget.com"
 
 # ログ設定
@@ -19,17 +19,20 @@ logger = logging.getLogger("webhook_bot")
 app = Flask(__name__)
 
 def make_headers(method, path, query="", body=""):
-    if not API_SECRET:
-        raise Exception("API_SECRET is not set")
     timestamp = str(int(time.time() * 1000))
-    prehash = f"{timestamp}{method.upper()}{path}{query}{body}"
-    sign = hmac.new(API_SECRET.encode(), prehash.encode(), hashlib.sha256).hexdigest()
+    full_path = f"{path}{query}"
+    prehash = f"{timestamp}{method.upper()}{full_path}{body}"
+    sign = hmac.new(
+        API_SECRET.encode("utf-8"),
+        prehash.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
 
     headers = {
         "ACCESS-KEY": API_KEY,
         "ACCESS-SIGN": sign,
         "ACCESS-TIMESTAMP": timestamp,
-        "ACCESS-PASSPHRASE": API_PASSPHRASE
+        "ACCESS-PASSPHRASE": API_PASSPHRASE,
     }
     if method.upper() != "GET":
         headers["Content-Type"] = "application/json"
@@ -46,9 +49,9 @@ def get_ticker():
 
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
-    query = "?symbol=BTCUSDT_UMCBL"
-    url = f"{BASE_URL}{path}{query}"
-    headers = make_headers("GET", path, query=query)
+    # query を削除（←これが署名エラーの原因の可能性大）
+    url = f"{BASE_URL}{path}"
+    headers = make_headers("GET", path)  # query も body も不要
     response = requests.get(url, headers=headers)
     logger.info("[get_margin_balance] Response: %s", response.json())
     return response.json()
