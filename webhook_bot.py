@@ -5,11 +5,8 @@ import hmac
 import hashlib
 import requests
 import logging
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
-
+# 環境変数はRenderの環境設定（Environment）から直接読み込む（.envファイルは使わない）
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
 API_PASSPHRASE = os.getenv("API_PASSPHRASE")
