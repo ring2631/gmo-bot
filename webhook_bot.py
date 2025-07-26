@@ -55,14 +55,15 @@ def get_ticker():
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
     url = BASE_URL + path
+    body_dict = {"symbol": SYMBOL}
+    body = json.dumps(body_dict, separators=(',', ':'))  # ← スペースなしで
 
-    body = ""  # ← symbolなしで一度テスト
     headers = make_headers("POST", path, body)
-
+    
     logger.info(f"[get_margin_balance] body: {body}")
     logger.info(f"[get_margin_balance] headers: {headers}")
-
-    response = requests.post(url, headers=headers, data=body)
+    
+    response = requests.post(url, headers=headers, data=body)  # ← ← ← これ！
     logger.info(f"[get_margin_balance] Response: {response.json()}")
     return response.json()
 
