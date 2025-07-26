@@ -6,24 +6,28 @@ import hashlib
 import requests
 import logging
 
-# Read environment variables
-API_KEY = os.getenv("BITGET_API_KEY")
-API_SECRET = os.getenv("BITGET_API_SECRET")
-API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
-BASE_URL = "https://api.bitget.com"
-
 # Logging setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
+# Read environment variables (Render 用の名前に合わせる)
+API_KEY = os.environ.get("BITGET_API_KEY")
+API_SECRET = os.environ.get("BITGET_API_SECRET")
+API_PASSPHRASE = os.environ.get("BITGET_API_PASSPHRASE")
+BASE_URL = "https://api.bitget.com"
+
 app = Flask(__name__)
 
 def make_headers(method, path, query="", body=""):
-    if not API_SECRET:
-        raise ValueError("API_SECRET is not set")
     timestamp = str(int(time.time() * 1000))
     full_path = f"{path}{query}"
     prehash = f"{timestamp}{method.upper()}{full_path}{body}"
+    logger.info("[make_headers] timestamp: %s", timestamp)
+    logger.info("[make_headers] prehash: %s", prehash)
+
+    if not API_SECRET:
+        raise Exception("API_SECRET is not set")
+
     sign = hmac.new(
         API_SECRET.encode("utf-8"),
         prehash.encode("utf-8"),
@@ -77,7 +81,7 @@ def webhook():
 
             account = get_margin_balance()
             if account["code"] != "00000":
-                raise Exception("Margin API error: %s" % account["msg"])
+                raise Exception(f"Margin API error: {account['msg']}")
 
             return jsonify({"status": "success", "volatility": volatility})
 
