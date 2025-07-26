@@ -6,10 +6,10 @@ import hashlib
 import requests
 import logging
 
-# Renderの環境変数をそのまま使用
-API_KEY = os.environ.get("API_KEY")
-API_SECRET = os.environ.get("API_SECRET")
-API_PASSPHRASE = os.environ.get("API_PASSPHRASE")
+# Renderの環境変数（BITGET_〜の名前）をそのまま使う
+API_KEY = os.environ.get("BITGET_API_KEY")
+API_SECRET = os.environ.get("BITGET_API_SECRET")
+API_PASSPHRASE = os.environ.get("BITGET_API_PASSPHRASE")
 BASE_URL = "https://api.bitget.com"
 
 # ログ設定
@@ -88,6 +88,7 @@ def test():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
 
 
 
