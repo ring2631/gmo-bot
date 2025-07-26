@@ -5,14 +5,21 @@ import requests
 import json
 import os
 from urllib.parse import urlencode
+from flask import Flask
 
-# --- Renderでは .env は使わないので load_dotenv は不要 ---
-# APIキー・シークレット・パスフレーズを環境変数から取得
+# Flaskアプリ
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bitget Bot is running!"
+
+# --- 環境変数からAPIキー類を取得（Render用に .env は使わない） ---
 API_KEY = os.environ["BITGET_API_KEY"]
 API_SECRET = os.environ["BITGET_API_SECRET"]
 API_PASSPHRASE = os.environ["BITGET_API_PASSPHRASE"]
 
-# --- ヘッダー生成関数 ---
+# --- Bitget用の署名付きヘッダー生成 ---
 def make_headers(api_key, api_secret, api_passphrase, method, path, query_string="", body=""):
     timestamp = str(int(time.time() * 1000))
     full_path = path
@@ -28,7 +35,7 @@ def make_headers(api_key, api_secret, api_passphrase, method, path, query_string
         "Content-Type": "application/json"
     }
 
-# --- Bitget署名テストを実行 ---
+# --- 起動時に1回だけ署名テスト ---
 def test_signature():
     base_url = "https://api.bitget.com"
     path = "/api/mix/v1/account/account"
@@ -46,7 +53,12 @@ def test_signature():
     print("=== Bitget Signature Test ===")
     print(json.dumps(response.json(), indent=2))
 
-# --- 実行 ---
+# --- エントリーポイント ---
 if __name__ == "__main__":
-    test_signature()
+    # 環境変数で署名テストONなら実行（Renderの Environment に指定）
+    if os.environ.get("RUN_SIGNATURE_TEST") == "true":
+        test_signature()
+
+    # Flaskを常駐させる
+    app.run(host="0.0.0.0", port=5000)
 
