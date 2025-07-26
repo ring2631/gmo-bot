@@ -5,8 +5,9 @@ import hmac
 import hashlib
 import requests
 import logging
+import json
 
-# 環境変数から取得（Render の設定に合わせる）
+# 環境変数（RenderのEnvironment名に合わせて変更していない）
 API_KEY = os.environ.get("BITGET_API_KEY")
 API_SECRET = os.environ.get("BITGET_API_SECRET")
 API_PASSPHRASE = os.environ.get("BITGET_API_PASSPHRASE")
@@ -36,9 +37,8 @@ def make_headers(method, path, query="", body=""):
         "ACCESS-SIGN": sign,
         "ACCESS-TIMESTAMP": timestamp,
         "ACCESS-PASSPHRASE": API_PASSPHRASE,
+        "Content-Type": "application/json"  # POSTは必須
     }
-    if method.upper() != "GET":
-        headers["Content-Type"] = "application/json"
     return headers
 
 def get_ticker():
@@ -52,10 +52,11 @@ def get_ticker():
 
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
-    body = '{"symbol":"BTCUSDT_UMCBL"}'
     url = f"{BASE_URL}{path}"
-    headers = make_headers("POST", path, body=body)
-    response = requests.post(url, headers=headers, data=body)
+    body_dict = {"symbol": "BTCUSDT_UMCBL"}
+    body_json = json.dumps(body_dict, separators=(',', ':'))  # ← ← ← 重要：余計な空白なし
+    headers = make_headers("POST", path, body=body_json)
+    response = requests.post(url, headers=headers, data=body_json)
     logger.info("[get_margin_balance] Response: %s", response.json())
     return response.json()
 
