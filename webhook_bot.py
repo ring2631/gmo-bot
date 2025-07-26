@@ -51,18 +51,15 @@ def get_margin_balance():
     url = BASE_URL + path
     body_dict = {"symbol": SYMBOL}
 
-    # 🔑 ボディを厳密に整形（separators重要）
+    # 🔸 ← ここ超重要！スペースを絶対入れないために使う
     body = json.dumps(body_dict, separators=(',', ':'))
 
-    # ✅ 署名はこのbody文字列で計算
     headers = make_headers("POST", path, body)
 
-    # ✅ Content-Type: application/json を保ったまま、文字列として送る
+    # 🔸 data=body で送る（json=body_dict にしない）
     response = requests.post(url, headers=headers, data=body)
-
     logger.info(f"[get_margin_balance] Response: {response.json()}")
     return response.json()
-
 
 # Webhook受信
 @app.route("/webhook", methods=["POST"])
