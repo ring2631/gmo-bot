@@ -3,11 +3,11 @@ import os
 import time
 import hmac
 import hashlib
+import json
 import requests
 import logging
-import json
 
-# 環境変数（RenderのEnvironment名に合わせて変更していない）
+# 環境変数（Render環境に設定されている前提）
 API_KEY = os.environ.get("BITGET_API_KEY")
 API_SECRET = os.environ.get("BITGET_API_SECRET")
 API_PASSPHRASE = os.environ.get("BITGET_API_PASSPHRASE")
@@ -19,6 +19,7 @@ logger = logging.getLogger("webhook_bot")
 
 app = Flask(__name__)
 
+# --- ヘッダー作成関数 ---
 def make_headers(method, path, query="", body=""):
     timestamp = str(int(time.time() * 1000))
     full_path = f"{path}{query}"
@@ -37,10 +38,12 @@ def make_headers(method, path, query="", body=""):
         "ACCESS-SIGN": sign,
         "ACCESS-TIMESTAMP": timestamp,
         "ACCESS-PASSPHRASE": API_PASSPHRASE,
-        "Content-Type": "application/json"  # POSTは必須
     }
+    if method.upper() != "GET":
+        headers["Content-Type"] = "application/json"
     return headers
 
+# --- ティッカー取得 ---
 def get_ticker():
     path = "/api/mix/v1/market/ticker"
     query = "?symbol=BTCUSDT_UMCBL"
@@ -50,16 +53,18 @@ def get_ticker():
     logger.info("[get_ticker] Response: %s", response.json())
     return response.json()
 
+# --- 証拠金取得（POST）---
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
     url = f"{BASE_URL}{path}"
     body_dict = {"symbol": "BTCUSDT_UMCBL"}
-    body_json = json.dumps(body_dict, separators=(',', ':'))  # ← ← ← 重要：余計な空白なし
+    body_json = json.dumps(body_dict, separators=(',', ':'))  # ← prehash 用
     headers = make_headers("POST", path, body=body_json)
-    response = requests.post(url, headers=headers, data=body_json)
+    response = requests.post(url, headers=headers, json=body_dict)  # ← POST本体送信
     logger.info("[get_margin_balance] Response: %s", response.json())
     return response.json()
 
+# --- Webhookエンドポイント ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
     raw_data = request.data.decode("utf-8")
@@ -89,9 +94,12 @@ def webhook():
 
     return jsonify({"status": "ignored"})
 
+# --- テスト用 ---
 @app.route("/test", methods=["GET"])
 def test():
     return jsonify(get_ticker())
 
+# --- Flask起動 ---
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
