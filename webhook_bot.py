@@ -6,8 +6,11 @@ import hashlib
 import requests
 import logging
 import json
+from dotenv import load_dotenv
 
-# 環境変数からAPIキー類を取得（Render環境）
+# Load environment variables
+load_dotenv()
+
 API_KEY = os.getenv("BITGET_API_KEY")
 API_SECRET = os.getenv("BITGET_API_SECRET")
 API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
@@ -19,32 +22,34 @@ logger = logging.getLogger("webhook_bot")
 
 app = Flask(__name__)
 
-def make_headers(method, path, body=""):
+def make_headers(method, path, query="", body=""):
     timestamp = str(int(time.time() * 1000))
-    prehash = f"{timestamp}{method.upper()}{path}{body}"
-    logger.info("[make_headers] timestamp: %s", timestamp)
-    logger.info("[make_headers] prehash: %s", prehash)
-
+    full_path = f"{path}{query}"
+    prehash = f"{timestamp}{method.upper()}{full_path}{body}"
     sign = hmac.new(
         API_SECRET.encode("utf-8"),
         prehash.encode("utf-8"),
         hashlib.sha256
     ).hexdigest()
 
+    logger.info("[make_headers] timestamp: %s", timestamp)
+    logger.info("[make_headers] prehash: %s", prehash)
+
     headers = {
         "ACCESS-KEY": API_KEY,
         "ACCESS-SIGN": sign,
         "ACCESS-TIMESTAMP": timestamp,
         "ACCESS-PASSPHRASE": API_PASSPHRASE,
-        "Content-Type": "application/json"
     }
+    if method.upper() != "GET":
+        headers["Content-Type"] = "application/json"
     return headers
 
 def get_ticker():
     path = "/api/mix/v1/market/ticker"
     query = "?symbol=BTCUSDT_UMCBL"
     url = f"{BASE_URL}{path}{query}"
-    headers = make_headers("GET", f"{path}{query}")
+    headers = make_headers("GET", path, query=query)
     response = requests.get(url, headers=headers)
     logger.info("[get_ticker] Response: %s", response.json())
     return response.json()
@@ -52,10 +57,10 @@ def get_ticker():
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
     body_dict = {"symbol": "BTCUSDT_UMCBL"}
-    body_str = json.dumps(body_dict, separators=(",", ":"))
+    body = json.dumps(body_dict, separators=(',', ':'), sort_keys=True)
     url = f"{BASE_URL}{path}"
-    headers = make_headers("POST", path, body=body_str)
-    response = requests.post(url, headers=headers, data=body_str)
+    headers = make_headers("POST", path, body=body)
+    response = requests.post(url, headers=headers, data=body)
     logger.info("[get_margin_balance] Response: %s", response.json())
     return response.json()
 
@@ -78,7 +83,7 @@ def webhook():
 
             account = get_margin_balance()
             if account["code"] != "00000":
-                raise Exception(f"Margin API error: {account['msg']}")
+                raise Exception("Margin API error: %s" % account["msg"])
 
             return jsonify({"status": "success", "volatility": volatility})
 
