@@ -5,21 +5,19 @@ import requests
 import json
 import os
 from urllib.parse import urlencode
-from flask import Flask
+from flask import Flask, request, jsonify
 
-# Flaskアプリ
 app = Flask(__name__)
 
 @app.route("/")
 def home():
     return "Bitget Bot is running!"
 
-# --- 環境変数からAPIキー類を取得（Render用に .env は使わない） ---
+# ← ここから Bitget API用
 API_KEY = os.environ["BITGET_API_KEY"]
 API_SECRET = os.environ["BITGET_API_SECRET"]
 API_PASSPHRASE = os.environ["BITGET_API_PASSPHRASE"]
 
-# --- Bitget用の署名付きヘッダー生成 ---
 def make_headers(api_key, api_secret, api_passphrase, method, path, query_string="", body=""):
     timestamp = str(int(time.time() * 1000))
     full_path = path
@@ -35,7 +33,7 @@ def make_headers(api_key, api_secret, api_passphrase, method, path, query_string
         "Content-Type": "application/json"
     }
 
-# --- 起動時に1回だけ署名テスト ---
+# --- 署名テスト ---
 def test_signature():
     base_url = "https://api.bitget.com"
     path = "/api/mix/v1/account/account"
@@ -53,12 +51,24 @@ def test_signature():
     print("=== Bitget Signature Test ===")
     print(json.dumps(response.json(), indent=2))
 
-# --- エントリーポイント ---
+
+# ✅ Webhook受信エンドポイント（TradingViewから叩かれる）
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    try:
+        data = request.get_data(as_text=True)
+        print(f"[Webhook] Received data: {data}")
+        # TODO: ここでTradingViewのシグナルを解析して注文処理を実行
+        return jsonify({"status": "ok", "message": "Webhook received"}), 200
+    except Exception as e:
+        print(f"[Webhook] Error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 if __name__ == "__main__":
-    # 環境変数で署名テストONなら実行（Renderの Environment に指定）
     if os.environ.get("RUN_SIGNATURE_TEST") == "true":
         test_signature()
 
-    # Flaskを常駐させる
     app.run(host="0.0.0.0", port=5000)
+
 
