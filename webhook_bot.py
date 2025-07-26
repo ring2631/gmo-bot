@@ -8,12 +8,12 @@ import re
 import json
 from flask import Flask, request, jsonify
 
-# --- 環境変数（Render等で設定） ---
+# --- 環境変数（Renderなどで設定） ---
 API_KEY = os.environ["BITGET_API_KEY"]
 API_SECRET = os.environ["BITGET_API_SECRET"]
 API_PASSPHRASE = os.environ["BITGET_API_PASSPHRASE"]
 
-# --- 設定 ---
+# --- 各種設定 ---
 SYMBOL = "BTCUSDT_UMCBL"
 MARGIN_COIN = "USDT"
 RISK_RATIO = 0.35
@@ -35,7 +35,6 @@ def make_headers(method, path, query="", body=""):
         prehash.encode(),
         hashlib.sha256
     ).hexdigest()
-
     return {
         "ACCESS-KEY": API_KEY,
         "ACCESS-SIGN": sign,
@@ -45,7 +44,7 @@ def make_headers(method, path, query="", body=""):
     }
 
 
-# --- BTC現在価格取得 ---
+# --- 現在価格取得 ---
 def get_btc_price():
     path = "/api/mix/v1/market/ticker"
     query = f"symbol={SYMBOL}"
@@ -56,21 +55,20 @@ def get_btc_price():
     return float(res["data"]["last"])
 
 
-# --- 証拠金取得（POST方式で署名回避） ---
+# --- 証拠金（USDT）取得（GET + query + 署名に含める方式）---
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
-    url = f"https://api.bitget.com{path}"
-    body_dict = {"marginCoin": MARGIN_COIN}
-    body = json.dumps(body_dict)
-    headers = make_headers("POST", path, body=body)
-    res = requests.post(url, headers=headers, data=body).json()
+    query = f"marginCoin={MARGIN_COIN}"
+    url = f"https://api.bitget.com{path}?{query}"
+    headers = make_headers("GET", path, query=query)
+    res = requests.get(url, headers=headers).json()
     logger.info(f"[get_margin_balance] Account: {res}")
     if res["code"] != "00000":
         raise Exception(f"Margin API error: {res['msg']}")
     return float(res["data"]["usdtEquity"])
 
 
-# --- 注文実行（トレイリングストップ付き） ---
+# --- 注文実行（トレイリングストップ + 損切り）---
 def execute_order(volatility):
     btc_price = get_btc_price()
     usdt_equity = get_margin_balance()
@@ -106,7 +104,7 @@ def execute_order(volatility):
     return response.json()
 
 
-# --- Webhookエンドポイント ---
+# --- Webhook受信エンドポイント ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
@@ -129,7 +127,7 @@ def webhook():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-# --- ヘルスチェック用 ---
+# --- 動作確認用エンドポイント ---
 @app.route("/")
 def home():
     return "Bitget Webhook Bot is Running!"
