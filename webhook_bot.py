@@ -28,8 +28,6 @@ def make_headers(method, path, body=""):
     prehash = f"{timestamp}{method}{path}{body}"
     logger.info(f"[make_headers] timestamp: {timestamp}")
     logger.info(f"[make_headers] prehash: {prehash}")
-    logger.info(f"[get_margin_balance] body: {body}")
-    logger.info(f"[get_margin_balance] headers: {headers}")
     sign = hmac.new(API_SECRET.encode(), prehash.encode(), hashlib.sha256).hexdigest()
     return {
         "ACCESS-KEY": API_KEY,
@@ -58,6 +56,12 @@ def get_margin_balance():
     response = requests.post(url, headers=headers, data=body)
     logger.info(f"[get_margin_balance] Response: {response.json()}")
     return response.json()
+try:
+    body = json.dumps(body_dict, separators=(',', ':'))
+    headers = make_headers("POST", path, body)
+except Exception as e:
+    logger.error(f"[get_margin_balance] Exception in signing: {e}")
+
 
 # --- Webhook受信エンドポイント ---
 @app.route("/webhook", methods=["POST"])
