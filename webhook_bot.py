@@ -27,14 +27,8 @@ logger = logging.getLogger("webhook_bot")
 # --- 署名付きヘッダー作成 ---
 def make_headers(method, path, query="", body=""):
     timestamp = str(int(time.time() * 1000))
-
-    if method.upper() in ["GET", "DELETE"] and query:
-        full_path = f"{path}?{query}"
-        final_body = ""
-    else:
-        full_path = path
-        final_body = body or ""
-
+    full_path = f"{path}?{query}" if method.upper() in ["GET", "DELETE"] and query else path
+    final_body = body or ""
     prehash = timestamp + method.upper() + full_path + final_body
     sign = hmac.new(API_SECRET.encode(), prehash.encode(), hashlib.sha256).hexdigest()
 
@@ -46,7 +40,7 @@ def make_headers(method, path, query="", body=""):
         "Content-Type": "application/json"
     }
 
-# --- BTC価格取得 ---
+# --- 現在のBTC価格取得 ---
 def get_btc_price():
     path = "/api/mix/v1/market/ticker"
     query = f"symbol={SYMBOL}"
@@ -56,10 +50,10 @@ def get_btc_price():
     logger.info(f"[get_btc_price] Ticker: {res}")
     return float(res["data"]["last"])
 
-# --- 証拠金取得（URLにクエリ含める） ---
+# --- 証拠金取得（symbolを使わない） ---
 def get_margin_balance():
     path = "/api/mix/v1/account/account"
-    query = f"symbol={SYMBOL}&marginCoin={MARGIN_COIN}"
+    query = f"marginCoin={MARGIN_COIN}"  # ← symbol削除！
     url = f"https://api.bitget.com{path}?{query}"
     headers = make_headers("GET", path, query=query)
     res = requests.get(url, headers=headers).json()
@@ -68,7 +62,7 @@ def get_margin_balance():
         raise Exception(f"Margin API error: {res['msg']}")
     return float(res["data"]["usdtEquity"])
 
-# --- 注文発注（トレイリングストップ付き） ---
+# --- 注文実行（トレイリングストップ付き） ---
 def execute_order(volatility):
     btc_price = get_btc_price()
     usdt_equity = get_margin_balance()
@@ -104,7 +98,7 @@ def execute_order(volatility):
     logger.info(f"[execute_order] Order response: {response.text}")
     return response.json()
 
-# --- Webhook 受信 ---
+# --- Webhook受信処理 ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
@@ -126,7 +120,7 @@ def webhook():
         logger.error(f"[webhook] Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# --- テスト用 ---
+# --- 起動確認用 ---
 @app.route("/")
 def home():
     return "Bitget Webhook Bot is Running!"
