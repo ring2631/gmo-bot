@@ -1,6 +1,7 @@
 import os
 import logging
 import re
+import pandas as pd
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from pybitget import Client  # pip install python-bitget
@@ -16,6 +17,9 @@ SYMBOL = "BTCUSDT_UMCBL"
 MARGIN_COIN = "USDT"
 RISK_RATIO = 0.35
 LEVERAGE = 2
+ATR_LENGTH = 14
+ATR_MULTIPLIER = 1.5
+KLINE_INTERVAL = "1H"
 
 # ---- Flask & ログ ----
 app = Flask(__name__)
@@ -41,15 +45,36 @@ def get_margin_balance():
     logger.info(f"[get_margin_balance] Account: {res}")
     return float(res["data"]["available"])
 
-# ---- ロング注文（損切りのみ設定）----
-def execute_order(volatility):
+# ---- ATR取得 ----
+def get_atr(symbol=SYMBOL, interval=KLINE_INTERVAL, length=ATR_LENGTH):
+    res = client.mix_get_candles(symbol=symbol, granularity=interval, limit=length+1)
+    candles = res["data"]
+    df = pd.DataFrame(candles, columns=["ts", "open", "high", "low", "close", "volume"])
+    df[["high", "low", "close"]] = df[["high", "low", "close"]].astype(float)
+
+    df["prev_close"] = df["close"].shift(1)
+    df["tr"] = df.apply(
+        lambda row: max(
+            row["high"] - row["low"],
+            abs(row["high"] - row["prev_close"]),
+            abs(row["low"] - row["prev_close"])
+        ), axis=1
+    )
+    atr = df["tr"].rolling(window=length).mean().iloc[-1]
+    logger.info(f"[get_atr] Calculated ATR: {atr}")
+    return atr
+
+# ---- ロング注文（ATRを用いた損切）----
+def execute_order():
     btc_price = get_btc_price()
+    atr = get_atr()
     margin = get_margin_balance()
     order_value = margin * RISK_RATIO * LEVERAGE
     size = round(order_value / btc_price, 4)
     logger.info(f"[execute_order] Calculated order size: {size} BTC")
 
-    stop_loss_price = round(btc_price - volatility, 1)
+    stop_loss_price = round(btc_price - atr * ATR_MULTIPLIER, 1)
+    logger.info(f"[execute_order] Stop loss price (ATR-based): {stop_loss_price}")
 
     order = client.mix_place_order(
         symbol=SYMBOL,
@@ -82,16 +107,7 @@ def webhook():
 
     if "BUY" in raw:
         logger.info("[webhook] BUY signal detected")
-        match = re.search(r"VOL\s*=\s*([0-9.]+)", raw)
-        if match:
-            volatility = float(match.group(1))
-            logger.info(f"[webhook] Extracted volatility: {volatility}")
-        else:
-            btc_price = get_btc_price()
-            volatility = btc_price * 0.005
-            logger.info(f"[webhook] No VOL found. Using default volatility: {volatility}")
-
-        result = execute_order(volatility)
+        result = execute_order()
         return jsonify({"status": "success", "order": result}), 200
 
     if "LONG_TRAIL_STOP" in raw:
@@ -104,6 +120,7 @@ def webhook():
 # ---- 起動 ----
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
+
 
 
 
