@@ -115,9 +115,12 @@ def execute_order():
 
 # ---- ポジションをクローズ（成行） ----
 def close_long_position():
-    res = client.mix_cp_close_position(
+    res = client.mix_place_order(
         symbol=SYMBOL,
-        holdSide="long"  # ← long ポジションをクローズ
+        marginCoin=MARGIN_COIN,
+        size=POSITION_SIZE,  # ← 現在のポジションサイズを設定する
+        side="close_long",
+        orderType="market"
     )
     logger.info(f"[close_long_position] Close response: {res}")
     return res
