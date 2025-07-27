@@ -117,8 +117,7 @@ def execute_order():
 def close_long_position():
     res = client.mix_cp_close_position(
         symbol=SYMBOL,
-        marginCoin=MARGIN_COIN,
-        holdSide="long"  # ← 'close_long' じゃなくて 'long'
+        holdSide="long"  # ← long ポジションをクローズ
     )
     logger.info(f"[close_long_position] Close response: {res}")
     return res
