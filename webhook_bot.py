@@ -46,23 +46,37 @@ def get_margin_balance():
     return float(res["data"]["available"])
 
 # ---- ATR取得 ----
-def get_atr(symbol=SYMBOL, interval=KLINE_INTERVAL, length=ATR_LENGTH):
-    res = client.mix_get_candles(symbol=symbol, granularity=interval, limit=length+1)
-    candles = res["data"]
-    df = pd.DataFrame(candles, columns=["ts", "open", "high", "low", "close", "volume"])
-    df[["high", "low", "close"]] = df[["high", "low", "close"]].astype(float)
+def get_atr(symbol="BTCUSDT_UMCBL", interval=3600, length=14):
+    now = int(time.time() * 1000)  # 現在時刻（ミリ秒）
+    start_time = now - (length + 1) * interval * 1000
+    end_time = now
 
-    df["prev_close"] = df["close"].shift(1)
-    df["tr"] = df.apply(
-        lambda row: max(
-            row["high"] - row["low"],
-            abs(row["high"] - row["prev_close"]),
-            abs(row["low"] - row["prev_close"])
-        ), axis=1
+    res = client.mix_get_candles(
+        symbol=symbol,
+        granularity=interval,
+        startTime=start_time,
+        endTime=end_time
     )
-    atr = df["tr"].rolling(window=length).mean().iloc[-1]
-    logger.info(f"[get_atr] Calculated ATR: {atr}")
+
+    candles = res['data']  # 最新が末尾
+    candles.reverse()  # 時系列順に並べ替え
+
+    highs = [float(c[3]) for c in candles]  # High
+    lows = [float(c[4]) for c in candles]   # Low
+    closes = [float(c[2]) for c in candles] # Close
+
+    trs = []
+    for i in range(1, len(highs)):
+        high = highs[i]
+        low = lows[i]
+        prev_close = closes[i - 1]
+        tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+        trs.append(tr)
+
+    atr = sum(trs[-length:]) / length
+    logger.info(f"[get_atr] ATR ({length} period): {atr:.2f}")
     return atr
+
 
 # ---- ロング注文（ATRを用いた損切）----
 def execute_order():
