@@ -114,16 +114,24 @@ def execute_order():
     return order
 
 # ---- ポジションをクローズ（成行） ----
+# ---- 現在のロングポジションサイズを取得して成行でクローズ ----
 def close_long_position():
-    res = client.mix_place_order(
+    # 現在のポジションサイズを取得
+    res = client.mix_get_single_position(symbol=SYMBOL, marginCoin=MARGIN_COIN)
+    size = float(res['data']['total'])  # 保有量を取得（"total"）
+
+    # クローズ注文（成行）
+    order = client.mix_place_order(
         symbol=SYMBOL,
         marginCoin=MARGIN_COIN,
-        size=POSITION_SIZE,  # ← 現在のポジションサイズを設定する
+        size=size,
         side="close_long",
         orderType="market"
     )
-    logger.info(f"[close_long_position] Close response: {res}")
-    return res
+
+    logger.info(f"[close_long_position] Position size: {size}")
+    logger.info(f"[close_long_position] Close response: {order}")
+    return order
 
 # ---- Webhook受信 ----
 @app.route("/webhook", methods=["POST"])
