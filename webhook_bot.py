@@ -17,7 +17,7 @@ MARGIN_COIN = "USDT"
 RISK_RATIO = 0.35
 LEVERAGE = 2
 
-# ---- Flask & ロガー ----
+# ---- Flask & ログ ----
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
@@ -39,79 +39,72 @@ def get_btc_price():
 def get_margin_balance():
     res = client.mix_get_account(symbol=SYMBOL, marginCoin=MARGIN_COIN)
     logger.info(f"[get_margin_balance] Account: {res}")
-    return res["data"]
+    return float(res["data"]["available"])
 
-# ---- 注文処理（VOLで利確幅を計算）----
+# ---- ロング注文（損切りのみ設定）----
 def execute_order(volatility):
     btc_price = get_btc_price()
     margin = get_margin_balance()
-    usdt_equity = float(margin["usdtEquity"])
+    order_value = margin * RISK_RATIO * LEVERAGE
+    size = round(order_value / btc_price, 4)
+    logger.info(f"[execute_order] Calculated order size: {size} BTC")
 
-    # 証拠金 × RISK × LEVERAGE ÷ 現在価格 → 注文サイズ
-    order_margin = usdt_equity * RISK_RATIO
-    position_value = order_margin * LEVERAGE
-    order_size = round(position_value / btc_price, 3)
-    logger.info(f"[execute_order] Calculated order size: {order_size} BTC")
+    stop_loss_price = round(btc_price - volatility, 1)
 
-    if order_size <= 0:
-        raise ValueError("Order size is zero or less. Skipping order.")
+    order = client.mix_place_order(
+        symbol=SYMBOL,
+        marginCoin=MARGIN_COIN,
+        size=str(size),
+        side="open_long",
+        orderType="market",
+        timeInForceValue="normal",
+        presetStopLossPrice=str(stop_loss_price)
+    )
+    logger.info(f"[execute_order] Order placed: {order}")
+    return order
 
-    # Stop Loss（現在価格の 2.5% 下）
-    stop_loss_price = round(btc_price * 0.975, 1)
+# ---- ポジションをクローズ（成行） ----
+def close_long_position():
+    res = client.mix_close_positions(
+        symbol=SYMBOL,
+        marginCoin=MARGIN_COIN,
+        side="close_long",
+        posMode="single"
+    )
+    logger.info(f"[close_long_position] Close response: {res}")
+    return res
 
-    # Take Profit（VOL × 1.5 上）
-    take_profit_price = round(btc_price + volatility * 1.5, 1)
-
-    # 実行
-    try:
-        order = client.mix_place_order(
-            symbol=SYMBOL,
-            marginCoin=MARGIN_COIN,
-            side="open_long",
-            orderType="market",
-            size=str(order_size),
-            price="",  # 成行
-            timeInForceValue="normal",
-            presetStopLossPrice=str(stop_loss_price),
-            presetTakeProfitPrice=str(take_profit_price)
-        )
-        logger.info(f"[execute_order] Order placed: {order}")
-        return order
-    except Exception as e:
-        logger.error(f"[execute_order] Order failed: {e}")
-        raise
-
-# ---- Webhookエンドポイント ----
+# ---- Webhook受信 ----
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    try:
-        raw = request.data.decode("utf-8").strip()
-        logger.info(f"[webhook] Raw: {raw}")
+    raw = request.data.decode("utf-8")
+    logger.info(f"[webhook] Raw: {raw}")
 
-        if "BUY" in raw:
-            logger.info("[webhook] BUY signal detected")
-
-            match = re.search(r"VOL\s*=\s*([0-9.]+)", raw)
-            volatility = float(match.group(1)) if match else 100.0
+    if "BUY" in raw:
+        logger.info("[webhook] BUY signal detected")
+        match = re.search(r"VOL\s*=\s*([0-9.]+)", raw)
+        if match:
+            volatility = float(match.group(1))
             logger.info(f"[webhook] Extracted volatility: {volatility}")
+        else:
+            btc_price = get_btc_price()
+            volatility = btc_price * 0.005
+            logger.info(f"[webhook] No VOL found. Using default volatility: {volatility}")
 
-            result = execute_order(volatility)
-            return jsonify({"status": "success", "order": result}), 200
+        result = execute_order(volatility)
+        return jsonify({"status": "success", "order": result}), 200
 
-        return jsonify({"status": "ignored"}), 200
+    if "LONG_TRAIL_STOP" in raw:
+        logger.info("[webhook] TRAIL STOP signal detected")
+        result = close_long_position()
+        return jsonify({"status": "closed", "response": result}), 200
 
-    except Exception as e:
-        logger.error(f"[webhook] Error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-# ---- ホームエンドポイント ----
-@app.route("/")
-def home():
-    return "Bitget Webhook Bot is Running!"
+    return jsonify({"status": "ignored", "message": "No valid signal"}), 200
 
 # ---- 起動 ----
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(debug=True, host="0.0.0.0", port=5000)
+
 
 
 
