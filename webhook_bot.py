@@ -51,12 +51,11 @@ def get_atr(symbol="BTCUSDT_UMCBL", interval="1H", length=14):
     import time
     import pandas as pd
 
-    now = int(time.time() * 1000)  # 現在時刻（ミリ秒）
-    interval_ms = 60 * 60 * 1000  # 1時間足 = 3600000 ms
+    now = int(time.time() * 1000)
+    interval_ms = 60 * 60 * 1000
     start_time = now - (length + 1) * interval_ms
     end_time = now
 
-    # Bitget SDK では res はリスト（ローソク足の配列）
     res = client.mix_get_candles(
         symbol=symbol,
         granularity=interval,
@@ -64,12 +63,12 @@ def get_atr(symbol="BTCUSDT_UMCBL", interval="1H", length=14):
         endTime=end_time
     )
 
-    candles = res  # リスト形式 [[timestamp, open, high, low, close, vol], ...]
+    candles = res  # リスト形式: [[timestamp, open, high, low, close, volume, turnover], ...]
 
     if not candles or len(candles) < length + 1:
         raise ValueError("取得したローソク足データが不足しています")
 
-    df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume"])
+    df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
     df[["high", "low", "close"]] = df[["high", "low", "close"]].astype(float)
 
     df["prior_close"] = df["close"].shift(1)
