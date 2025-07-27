@@ -47,11 +47,16 @@ def get_margin_balance():
     return float(res["data"]["available"])
 
 # ---- ATR取得 ----
-def get_atr(symbol="BTCUSDT_UMCBL", interval=3600, length=14):
+def get_atr(symbol="BTCUSDT_UMCBL", interval="1H", length=14):
+    import time
+    import pandas as pd
+
     now = int(time.time() * 1000)  # 現在時刻（ミリ秒）
-    start_time = now - (length + 1) * interval * 1000
+    interval_ms = 60 * 60 * 1000  # 1時間足 = 3600000 ms
+    start_time = now - (length + 1) * interval_ms
     end_time = now
 
+    # Bitget SDK では res はリスト（ローソク足の配列）
     res = client.mix_get_candles(
         symbol=symbol,
         granularity=interval,
@@ -59,24 +64,30 @@ def get_atr(symbol="BTCUSDT_UMCBL", interval=3600, length=14):
         endTime=end_time
     )
 
-    candles = res['data']  # 最新が末尾
-    candles.reverse()  # 時系列順に並べ替え
+    candles = res  # リスト形式 [[timestamp, open, high, low, close, vol], ...]
 
-    highs = [float(c[3]) for c in candles]  # High
-    lows = [float(c[4]) for c in candles]   # Low
-    closes = [float(c[2]) for c in candles] # Close
+    if not candles or len(candles) < length + 1:
+        raise ValueError("取得したローソク足データが不足しています")
 
-    trs = []
-    for i in range(1, len(highs)):
-        high = highs[i]
-        low = lows[i]
-        prev_close = closes[i - 1]
-        tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
-        trs.append(tr)
+    df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume"])
+    df[["high", "low", "close"]] = df[["high", "low", "close"]].astype(float)
 
-    atr = sum(trs[-length:]) / length
-    logger.info(f"[get_atr] ATR ({length} period): {atr:.2f}")
-    return atr
+    df["prior_close"] = df["close"].shift(1)
+    df["tr"] = df[["high", "low", "prior_close"]].apply(
+        lambda row: max(
+            row["high"] - row["low"],
+            abs(row["high"] - row["prior_close"]),
+            abs(row["low"] - row["prior_close"])
+        ), axis=1
+    )
+
+    atr = df["tr"].rolling(window=length).mean().iloc[-1]
+    if pd.isna(atr):
+        raise ValueError("ATRの計算に失敗しました")
+
+    stop_width = round(atr * 1.5, 1)
+    logger.info(f"[get_atr] Calculated ATR: {atr}, Stop width: {stop_width}")
+    return stop_width
 
 
 # ---- ロング注文（ATRを用いた損切）----
