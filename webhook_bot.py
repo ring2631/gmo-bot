@@ -116,15 +116,20 @@ def execute_order():
 # ---- ポジションをクローズ（成行） ----
 def close_long_position():
     try:
-        # 現在のポジションサイズを取得
+        # 現在のポジション取得
         res = client.mix_get_single_position(symbol=SYMBOL, marginCoin=MARGIN_COIN)
-        position_data = res['data'][0]  # リストの最初の要素を取得
+        data = res.get('data', [])
 
-        size = float(position_data['total'])  # 保有量を取得
+        if not data:
+            logger.info("[close_long_position] No open position.")
+            return {"msg": "No open position"}
+
+        position_data = data[0]
+        size = float(position_data['total'])
 
         if size <= 0:
-            logger.info("[close_long_position] No position to close.")
-            return {"msg": "No position"}
+            logger.info("[close_long_position] Position size is zero.")
+            return {"msg": "No position to close"}
 
         # クローズ注文（成行）
         order = client.mix_place_order(
