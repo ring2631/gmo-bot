@@ -123,32 +123,32 @@ def execute_order():
 # ---- ポジションをクローズ（成行） ----
 def close_long_position():
     try:
-        # ✅ 現在のポジション取得
+        # 現在のポジションを取得
         res = client.mix_get_single_position(symbol=SYMBOL, marginCoin=MARGIN_COIN)
         logger.info(f"[close_long_position] Raw position response: {res}")
 
-        data = res.get('data', {})
-
-        # ✅ データが空 or 不正ならスキップ
-        if not data or 'total' not in data:
+        data = res.get('data', [])
+        if not data or not isinstance(data, list):
             logger.info("[close_long_position] No open position or invalid data structure.")
-            return {"msg": "No open position or invalid data"}
+            return {"msg": "No open position"}
 
-        size = float(data['total'])
+        # ロングポジションがあるか確認
+        long_positions = [pos for pos in data if pos.get('holdSide') == 'long' and float(pos.get('total', 0)) > 0]
 
-        # ✅ ポジションサイズがゼロならスキップ
-        if size <= 0:
-            logger.info("[close_long_position] Position size is zero. Nothing to close.")
-            return {"msg": "No position to close"}
+        if not long_positions:
+            logger.info("[close_long_position] No long position to close.")
+            return {"msg": "No long position"}
 
-        # ✅ クローズ注文（成行）
+        position_data = long_positions[0]
+        size = float(position_data['total'])
+
+        # クローズ注文（成行）
         order = client.mix_place_order(
             symbol=SYMBOL,
             marginCoin=MARGIN_COIN,
             size=size,
             side="close_long",
-            orderType="market",
-            timeInForceValue="normal"
+            orderType="market"
         )
 
         logger.info(f"[close_long_position] Position size: {size}")
