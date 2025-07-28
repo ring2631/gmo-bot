@@ -125,6 +125,8 @@ def close_long_position():
     try:
         # ✅ 現在のポジション取得
         res = client.mix_get_single_position(symbol=SYMBOL, marginCoin=MARGIN_COIN)
+        logger.info(f"[close_long_position] Raw position response: {res}")
+
         data = res.get('data', {})
 
         # ✅ データが空 or 不正ならスキップ
