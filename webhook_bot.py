@@ -123,28 +123,30 @@ def execute_order():
 # ---- ポジションをクローズ（成行） ----
 def close_long_position():
     try:
-        # 現在のポジション取得
+        # ✅ 現在のポジション取得
         res = client.mix_get_single_position(symbol=SYMBOL, marginCoin=MARGIN_COIN)
-        data = res.get('data', [])
+        data = res.get('data', {})
 
-        if not data:
-            logger.info("[close_long_position] No open position.")
-            return {"msg": "No open position"}
+        # ✅ データが空 or 不正ならスキップ
+        if not data or 'total' not in data:
+            logger.info("[close_long_position] No open position or invalid data structure.")
+            return {"msg": "No open position or invalid data"}
 
-        position_data = data[0]
-        size = float(position_data['total'])
+        size = float(data['total'])
 
+        # ✅ ポジションサイズがゼロならスキップ
         if size <= 0:
-            logger.info("[close_long_position] Position size is zero.")
+            logger.info("[close_long_position] Position size is zero. Nothing to close.")
             return {"msg": "No position to close"}
 
-        # クローズ注文（成行）
+        # ✅ クローズ注文（成行）
         order = client.mix_place_order(
             symbol=SYMBOL,
             marginCoin=MARGIN_COIN,
             size=size,
             side="close_long",
-            orderType="market"
+            orderType="market",
+            timeInForceValue="normal"
         )
 
         logger.info(f"[close_long_position] Position size: {size}")
@@ -154,7 +156,6 @@ def close_long_position():
     except Exception as e:
         logger.error(f"[close_long_position] Error: {e}")
         return {"error": str(e)}
-
 
 # ---- Webhook受信 ----
 @app.route("/webhook", methods=["POST"])
