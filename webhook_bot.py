@@ -88,8 +88,7 @@ def get_atr(symbol="BTCUSDT_UMCBL", interval="1H", length=14):
     logger.info(f"[get_atr] Calculated ATR: {atr}, Stop width: {stop_width}")
     return stop_width
 
-
-# ---- ロング注文（ATRを用いた損切）----
+# ---- ロング注文（Smart SL: ATR or Fixed 2%）----
 def execute_order():
     btc_price = get_btc_price()
     atr = get_atr()
@@ -98,9 +97,16 @@ def execute_order():
     size = round(order_value / btc_price, 4)
     logger.info(f"[execute_order] Calculated order size: {size} BTC")
 
-    stop_loss_price = round(btc_price - atr * ATR_MULTIPLIER, 1)
-    logger.info(f"[execute_order] Stop loss price (ATR-based): {stop_loss_price}")
+    # ✅ 損切り価格（ATR or 2%の深い方）
+    atr_stop = atr * 2.0
+    fixed_stop = btc_price * 0.02
+    stop_loss_distance = max(atr_stop, fixed_stop)
+    stop_loss_price = round(btc_price - stop_loss_distance, 1)
 
+    logger.info(f"[execute_order] Stop loss (ATR): {atr_stop:.1f}, Fixed: {fixed_stop:.1f}")
+    logger.info(f"[execute_order] Selected Stop Loss Price: {stop_loss_price}")
+
+    # ✅ 注文発行
     order = client.mix_place_order(
         symbol=SYMBOL,
         marginCoin=MARGIN_COIN,
@@ -112,6 +118,7 @@ def execute_order():
     )
     logger.info(f"[execute_order] Order placed: {order}")
     return order
+
 
 # ---- ポジションをクローズ（成行） ----
 def close_long_position():
