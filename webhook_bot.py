@@ -1,5 +1,6 @@
 import os
 import logging
+import re
 import time
 import pandas as pd
 from flask import Flask, request, jsonify
@@ -15,7 +16,6 @@ API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
 # ---- 設定 ----
 SYMBOL = "BTCUSDT_UMCBL"
 MARGIN_COIN = "USDT"
-MARGIN_COIN_SHORT = "USDC"
 RISK_RATIO = 0.35
 LEVERAGE = 2
 ATR_LENGTH = 14
@@ -41,13 +41,16 @@ def get_btc_price():
     return float(ticker["data"]["last"])
 
 # ---- 証拠金取得 ----
-def get_margin_balance(coin):
-    res = client.mix_get_account(symbol=SYMBOL, marginCoin=coin)
+def get_margin_balance():
+    res = client.mix_get_account(symbol=SYMBOL, marginCoin=MARGIN_COIN)
     logger.info(f"[get_margin_balance] Account: {res}")
     return float(res["data"]["available"])
 
 # ---- ATR取得 ----
 def get_atr(symbol="BTCUSDT_UMCBL", interval="1H", length=14):
+    import time
+    import pandas as pd
+
     now = int(time.time() * 1000)
     interval_ms = 60 * 60 * 1000
     start_time = now - (length + 1) * interval_ms
@@ -60,7 +63,8 @@ def get_atr(symbol="BTCUSDT_UMCBL", interval="1H", length=14):
         endTime=end_time
     )
 
-    candles = res
+    candles = res  # リスト形式: [[timestamp, open, high, low, close, volume, turnover], ...]
+
     if not candles or len(candles) < length + 1:
         raise ValueError("取得したローソク足データが不足しています")
 
@@ -84,15 +88,16 @@ def get_atr(symbol="BTCUSDT_UMCBL", interval="1H", length=14):
     logger.info(f"[get_atr] Calculated ATR: {atr}, Stop width: {stop_width}")
     return stop_width
 
-# ---- ロング注文 ----
+# ---- ロング注文（Smart SL: ATR or Fixed 2%）----
 def execute_order():
     btc_price = get_btc_price()
     atr = get_atr()
-    margin = get_margin_balance(MARGIN_COIN)
+    margin = get_margin_balance()
     order_value = margin * RISK_RATIO * LEVERAGE
     size = round(order_value / btc_price, 4)
     logger.info(f"[execute_order] Calculated order size: {size} BTC")
 
+    # ✅ 損切り価格（ATR or 2%の深い方）
     atr_stop = atr * 2.0
     fixed_stop = btc_price * 0.02
     stop_loss_distance = max(atr_stop, fixed_stop)
@@ -101,6 +106,7 @@ def execute_order():
     logger.info(f"[execute_order] Stop loss (ATR): {atr_stop:.1f}, Fixed: {fixed_stop:.1f}")
     logger.info(f"[execute_order] Selected Stop Loss Price: {stop_loss_price}")
 
+    # ✅ 注文発行
     order = client.mix_place_order(
         symbol=SYMBOL,
         marginCoin=MARGIN_COIN,
@@ -113,49 +119,30 @@ def execute_order():
     logger.info(f"[execute_order] Order placed: {order}")
     return order
 
-# ---- ショート注文（USDC）----
-def execute_short_order():
-    btc_price = get_btc_price()
-    atr = get_atr()
-    margin = get_margin_balance(MARGIN_COIN_SHORT)
-    order_value = margin * RISK_RATIO * LEVERAGE
-    size = round(order_value / btc_price, 4)
-    logger.info(f"[execute_short_order] Calculated order size: {size} BTC")
 
-    atr_stop = atr * 2.0
-    fixed_stop = btc_price * 0.02
-    stop_loss_distance = max(atr_stop, fixed_stop)
-    stop_loss_price = round(btc_price + stop_loss_distance, 1)
-
-    logger.info(f"[execute_short_order] Stop loss (ATR): {atr_stop:.1f}, Fixed: {fixed_stop:.1f}")
-    logger.info(f"[execute_short_order] Selected Stop Loss Price: {stop_loss_price}")
-
-    order = client.mix_place_order(
-        symbol=SYMBOL,
-        marginCoin=MARGIN_COIN_SHORT,
-        size=str(size),
-        side="open_short",
-        orderType="market",
-        timeInForceValue="normal",
-        presetStopLossPrice=str(stop_loss_price)
-    )
-    logger.info(f"[execute_short_order] Order placed: {order}")
-    return order
-
-# ---- ロングポジションをクローズ ----
+# ---- ポジションをクローズ（成行） ----
 def close_long_position():
     try:
+        # 現在のポジションを取得
         res = client.mix_get_single_position(symbol=SYMBOL, marginCoin=MARGIN_COIN)
         logger.info(f"[close_long_position] Raw position response: {res}")
+
         data = res.get('data', [])
         if not data or not isinstance(data, list):
+            logger.info("[close_long_position] No open position or invalid data structure.")
             return {"msg": "No open position"}
 
+        # ロングポジションがあるか確認
         long_positions = [pos for pos in data if pos.get('holdSide') == 'long' and float(pos.get('total', 0)) > 0]
+
         if not long_positions:
+            logger.info("[close_long_position] No long position to close.")
             return {"msg": "No long position"}
 
-        size = float(long_positions[0]['total'])
+        position_data = long_positions[0]
+        size = float(position_data['total'])
+
+        # クローズ注文（成行）
         order = client.mix_place_order(
             symbol=SYMBOL,
             marginCoin=MARGIN_COIN,
@@ -163,37 +150,13 @@ def close_long_position():
             side="close_long",
             orderType="market"
         )
+
+        logger.info(f"[close_long_position] Position size: {size}")
         logger.info(f"[close_long_position] Close response: {order}")
         return order
+
     except Exception as e:
         logger.error(f"[close_long_position] Error: {e}")
-        return {"error": str(e)}
-
-# ---- ショートポジションをクローズ ----
-def close_short_position():
-    try:
-        res = client.mix_get_single_position(symbol=SYMBOL, marginCoin=MARGIN_COIN_SHORT)
-        logger.info(f"[close_short_position] Raw position response: {res}")
-        data = res.get('data', [])
-        if not data or not isinstance(data, list):
-            return {"msg": "No open position"}
-
-        short_positions = [pos for pos in data if pos.get('holdSide') == 'short' and float(pos.get('total', 0)) > 0]
-        if not short_positions:
-            return {"msg": "No short position"}
-
-        size = float(short_positions[0]['total'])
-        order = client.mix_place_order(
-            symbol=SYMBOL,
-            marginCoin=MARGIN_COIN_SHORT,
-            size=size,
-            side="close_short",
-            orderType="market"
-        )
-        logger.info(f"[close_short_position] Close response: {order}")
-        return order
-    except Exception as e:
-        logger.error(f"[close_short_position] Error: {e}")
         return {"error": str(e)}
 
 # ---- Webhook受信 ----
@@ -207,19 +170,9 @@ def webhook():
         result = execute_order()
         return jsonify({"status": "success", "order": result}), 200
 
-    if "SELL" in raw:
-        logger.info("[webhook] SELL signal detected")
-        result = execute_short_order()
-        return jsonify({"status": "success", "order": result}), 200
-
     if "LONG_TRAIL_STOP" in raw:
-        logger.info("[webhook] LONG TRAIL STOP signal")
+        logger.info("[webhook] TRAIL STOP signal detected")
         result = close_long_position()
-        return jsonify({"status": "closed", "response": result}), 200
-
-    if "SHORT_TRAIL_STOP" in raw:
-        logger.info("[webhook] SHORT TRAIL STOP signal")
-        result = close_short_position()
         return jsonify({"status": "closed", "response": result}), 200
 
     return jsonify({"status": "ignored", "message": "No valid signal"}), 200
@@ -227,5 +180,8 @@ def webhook():
 # ---- 起動 ----
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
+
+
+
 
 
