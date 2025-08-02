@@ -1,143 +1,202 @@
 import os
-import hmac
-import time
-import json
-import hashlib
 import logging
-import requests
+import time
+import pandas as pd
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
-from bitget.openapi.mix_api import MixMarketApi, MixOrderApi, MixAccountApi, MixPositionApi
+from pybitget import Client  # pip install python-bitget
 
-# === 設定 ===
+# ---- 環境変数 ----
+load_dotenv()
+API_KEY = os.getenv("BITGET_API_KEY")
+API_SECRET = os.getenv("BITGET_API_SECRET")
+API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE")
+
+# ---- 設定 ----
 SYMBOL = "BTCUSDT_UMCBL"
 MARGIN_COIN = "USDT"
-SYMBOL_SHORT = "BTCUSDC_UMCBL"
 MARGIN_COIN_SHORT = "USDC"
-LEVERAGE = 2
 RISK_RATIO = 0.35
-KLINE_INTERVAL = "1H"
+LEVERAGE = 2
 ATR_LENGTH = 14
+ATR_MULTIPLIER = 1.5
+KLINE_INTERVAL = "1H"
 
-# === 初期化 ===
-load_dotenv()
+# ---- Flask & ログ ----
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook_bot")
 
-client = type("Client", (), {})()
-client.mix_market_api = MixMarketApi(api_key=os.getenv("ACCESS_KEY"), secret_key=os.getenv("SECRET_KEY"),
-                                     passphrase=os.getenv("PASSPHRASE"), use_server_time=True)
-client.mix_order_api = MixOrderApi(api_key=os.getenv("ACCESS_KEY"), secret_key=os.getenv("SECRET_KEY"),
-                                   passphrase=os.getenv("PASSPHRASE"), use_server_time=True)
-client.mix_account_api = MixAccountApi(api_key=os.getenv("ACCESS_KEY"), secret_key=os.getenv("SECRET_KEY"),
-                                       passphrase=os.getenv("PASSPHRASE"), use_server_time=True)
-client.mix_position_api = MixPositionApi(api_key=os.getenv("ACCESS_KEY"), secret_key=os.getenv("SECRET_KEY"),
-                                         passphrase=os.getenv("PASSPHRASE"), use_server_time=True)
+# ---- Bitgetクライアント ----
+client = Client(
+    api_key=API_KEY,
+    api_secret_key=API_SECRET,
+    passphrase=API_PASSPHRASE
+)
 
-# === 共通関数 ===
-def get_unix_time():
-    return int(time.time() * 1000)
-
-def get_atr(symbol, interval, length):
-    res = client.mix_market_api.get_candles(symbol=symbol, granularity=interval)
-    candles = res["data"][-(length + 1):]
-    closes = [float(c[4]) for c in candles]
-    highs = [float(c[2]) for c in candles]
-    lows = [float(c[3]) for c in candles]
-    trs = [max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
-           for i in range(1, len(closes))]
-    return sum(trs) / length
-
-# === ロング用 ===
+# ---- BTC価格取得 ----
 def get_btc_price():
-    res = client.mix_market_api.get_ticker(symbol=SYMBOL)
-    return float(res["data"]["last"])
+    ticker = client.mix_get_single_symbol_ticker(symbol=SYMBOL)
+    logger.info(f"[get_btc_price] Ticker: {ticker}")
+    return float(ticker["data"]["last"])
 
-def get_margin_balance():
-    res = client.mix_account_api.get_account(symbol=SYMBOL, marginCoin=MARGIN_COIN)
+# ---- 証拠金取得 ----
+def get_margin_balance(coin):
+    res = client.mix_get_account(symbol=SYMBOL, marginCoin=coin)
+    logger.info(f"[get_margin_balance] Account: {res}")
     return float(res["data"]["available"])
 
+# ---- ATR取得 ----
+def get_atr(symbol="BTCUSDT_UMCBL", interval="1H", length=14):
+    now = int(time.time() * 1000)
+    interval_ms = 60 * 60 * 1000
+    start_time = now - (length + 1) * interval_ms
+    end_time = now
+
+    res = client.mix_get_candles(
+        symbol=symbol,
+        granularity=interval,
+        startTime=start_time,
+        endTime=end_time
+    )
+
+    candles = res
+    if not candles or len(candles) < length + 1:
+        raise ValueError("取得したローソク足データが不足しています")
+
+    df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
+    df[["high", "low", "close"]] = df[["high", "low", "close"]].astype(float)
+
+    df["prior_close"] = df["close"].shift(1)
+    df["tr"] = df[["high", "low", "prior_close"]].apply(
+        lambda row: max(
+            row["high"] - row["low"],
+            abs(row["high"] - row["prior_close"]),
+            abs(row["low"] - row["prior_close"])
+        ), axis=1
+    )
+
+    atr = df["tr"].rolling(window=length).mean().iloc[-1]
+    if pd.isna(atr):
+        raise ValueError("ATRの計算に失敗しました")
+
+    stop_width = round(atr * 1.5, 1)
+    logger.info(f"[get_atr] Calculated ATR: {atr}, Stop width: {stop_width}")
+    return stop_width
+
+# ---- ロング注文 ----
 def execute_order():
-    price = get_btc_price()
-    atr = get_atr(SYMBOL, KLINE_INTERVAL, ATR_LENGTH)
-    margin = get_margin_balance()
+    btc_price = get_btc_price()
+    atr = get_atr()
+    margin = get_margin_balance(MARGIN_COIN)
     order_value = margin * RISK_RATIO * LEVERAGE
-    size = round(order_value / price, 4)
-    sl_price = round(price - max(atr * 2.0, price * 0.02), 1)
-    order = client.mix_order_api.place_order(
+    size = round(order_value / btc_price, 4)
+    logger.info(f"[execute_order] Calculated order size: {size} BTC")
+
+    atr_stop = atr * 2.0
+    fixed_stop = btc_price * 0.02
+    stop_loss_distance = max(atr_stop, fixed_stop)
+    stop_loss_price = round(btc_price - stop_loss_distance, 1)
+
+    logger.info(f"[execute_order] Stop loss (ATR): {atr_stop:.1f}, Fixed: {fixed_stop:.1f}")
+    logger.info(f"[execute_order] Selected Stop Loss Price: {stop_loss_price}")
+
+    order = client.mix_place_order(
         symbol=SYMBOL,
         marginCoin=MARGIN_COIN,
         size=str(size),
         side="open_long",
         orderType="market",
         timeInForceValue="normal",
-        presetStopLossPrice=str(sl_price)
+        presetStopLossPrice=str(stop_loss_price)
     )
-    logger.info(f"[execute_order] order: {order}")
+    logger.info(f"[execute_order] Order placed: {order}")
     return order
 
-def close_long_position():
-    pos = client.mix_position_api.get_single_position(symbol=SYMBOL, marginCoin=MARGIN_COIN)
-    data = pos.get("data", [])
-    long_pos = [p for p in data if p["holdSide"] == "long" and float(p["total"]) > 0]
-    if not long_pos:
-        return {"msg": "No long position"}
-    size = float(long_pos[0]["total"])
-    order = client.mix_order_api.place_order(
-        symbol=SYMBOL,
-        marginCoin=MARGIN_COIN,
-        size=size,
-        side="close_long",
-        orderType="market"
-    )
-    return order
-
-# === ショート用（USDC）===
-def get_btc_price_usdc():
-    res = client.mix_market_api.get_ticker(symbol=SYMBOL_SHORT)
-    return float(res["data"]["last"])
-
-def get_margin_balance_usdc():
-    res = client.mix_account_api.get_account(symbol=SYMBOL_SHORT, marginCoin=MARGIN_COIN_SHORT)
-    return float(res["data"]["available"])
-
+# ---- ショート注文（USDC）----
 def execute_short_order():
-    price = get_btc_price_usdc()
-    atr = get_atr(SYMBOL_SHORT, KLINE_INTERVAL, ATR_LENGTH)
-    margin = get_margin_balance_usdc()
+    btc_price = get_btc_price()
+    atr = get_atr()
+    margin = get_margin_balance(MARGIN_COIN_SHORT)
     order_value = margin * RISK_RATIO * LEVERAGE
-    size = round(order_value / price, 4)
-    sl_price = round(price + max(atr * 2.0, price * 0.02), 1)
-    order = client.mix_order_api.place_order(
-        symbol=SYMBOL_SHORT,
+    size = round(order_value / btc_price, 4)
+    logger.info(f"[execute_short_order] Calculated order size: {size} BTC")
+
+    atr_stop = atr * 2.0
+    fixed_stop = btc_price * 0.02
+    stop_loss_distance = max(atr_stop, fixed_stop)
+    stop_loss_price = round(btc_price + stop_loss_distance, 1)
+
+    logger.info(f"[execute_short_order] Stop loss (ATR): {atr_stop:.1f}, Fixed: {fixed_stop:.1f}")
+    logger.info(f"[execute_short_order] Selected Stop Loss Price: {stop_loss_price}")
+
+    order = client.mix_place_order(
+        symbol=SYMBOL,
         marginCoin=MARGIN_COIN_SHORT,
         size=str(size),
         side="open_short",
         orderType="market",
         timeInForceValue="normal",
-        presetStopLossPrice=str(sl_price)
+        presetStopLossPrice=str(stop_loss_price)
     )
-    logger.info(f"[execute_short_order] order: {order}")
+    logger.info(f"[execute_short_order] Order placed: {order}")
     return order
 
+# ---- ロングポジションをクローズ ----
+def close_long_position():
+    try:
+        res = client.mix_get_single_position(symbol=SYMBOL, marginCoin=MARGIN_COIN)
+        logger.info(f"[close_long_position] Raw position response: {res}")
+        data = res.get('data', [])
+        if not data or not isinstance(data, list):
+            return {"msg": "No open position"}
+
+        long_positions = [pos for pos in data if pos.get('holdSide') == 'long' and float(pos.get('total', 0)) > 0]
+        if not long_positions:
+            return {"msg": "No long position"}
+
+        size = float(long_positions[0]['total'])
+        order = client.mix_place_order(
+            symbol=SYMBOL,
+            marginCoin=MARGIN_COIN,
+            size=size,
+            side="close_long",
+            orderType="market"
+        )
+        logger.info(f"[close_long_position] Close response: {order}")
+        return order
+    except Exception as e:
+        logger.error(f"[close_long_position] Error: {e}")
+        return {"error": str(e)}
+
+# ---- ショートポジションをクローズ ----
 def close_short_position():
-    pos = client.mix_position_api.get_single_position(symbol=SYMBOL_SHORT, marginCoin=MARGIN_COIN_SHORT)
-    data = pos.get("data", [])
-    short_pos = [p for p in data if p["holdSide"] == "short" and float(p["total"]) > 0]
-    if not short_pos:
-        return {"msg": "No short position"}
-    size = float(short_pos[0]["total"])
-    order = client.mix_order_api.place_order(
-        symbol=SYMBOL_SHORT,
-        marginCoin=MARGIN_COIN_SHORT,
-        size=size,
-        side="close_short",
-        orderType="market"
-    )
-    return order
+    try:
+        res = client.mix_get_single_position(symbol=SYMBOL, marginCoin=MARGIN_COIN_SHORT)
+        logger.info(f"[close_short_position] Raw position response: {res}")
+        data = res.get('data', [])
+        if not data or not isinstance(data, list):
+            return {"msg": "No open position"}
 
-# === Webhook受信部 ===
+        short_positions = [pos for pos in data if pos.get('holdSide') == 'short' and float(pos.get('total', 0)) > 0]
+        if not short_positions:
+            return {"msg": "No short position"}
+
+        size = float(short_positions[0]['total'])
+        order = client.mix_place_order(
+            symbol=SYMBOL,
+            marginCoin=MARGIN_COIN_SHORT,
+            size=size,
+            side="close_short",
+            orderType="market"
+        )
+        logger.info(f"[close_short_position] Close response: {order}")
+        return order
+    except Exception as e:
+        logger.error(f"[close_short_position] Error: {e}")
+        return {"error": str(e)}
+
+# ---- Webhook受信 ----
 @app.route("/webhook", methods=["POST"])
 def webhook():
     raw = request.data.decode("utf-8")
@@ -165,9 +224,8 @@ def webhook():
 
     return jsonify({"status": "ignored", "message": "No valid signal"}), 200
 
-# === Flask起動 ===
+# ---- 起動 ----
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
-
 
 
